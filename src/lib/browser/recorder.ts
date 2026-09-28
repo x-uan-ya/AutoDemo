@@ -6,11 +6,16 @@ import {
   applyNetworkGuard,
 } from "./playwright-executor";
 import { summarize } from "./action-planner";
+import {
+  verifyAction,
+  isVerifiableActionType,
+} from "./verification";
 import type {
   RecordingResult,
   RecordingSceneResult,
   RecordingActionFailure,
   SceneActionSet,
+  ActionVerification,
 } from "./types";
 import {
   resolveRecordingSettings,
@@ -72,6 +77,8 @@ export async function recordDemo(
   const allScreenshots: string[] = [];
   const errors: RecordingActionFailure[] = [];
   const startedAt = Date.now();
+  // Phase 9: verifications accumulator, hoisted so it's available in the return.
+  const verifications: Record<string, Record<string, ActionVerification>> = {};
 
   let browser: Browser | null = null;
   let videoPublicPath: string | null = null;
@@ -115,6 +122,7 @@ export async function recordDemo(
     // Execute scene by scene.
     sceneLoop: for (const scene of options.scenes) {
       progress(`Recording scene ${scene.order}: ${scene.title}...`);
+      verifications[scene.sceneId] = {};
 
       const sceneStart = nowIso();
       const screenshotPaths: string[] = [];
@@ -174,6 +182,44 @@ export async function recordDemo(
           });
           // Stop the whole recording rather than pretend later scenes ran.
           break sceneLoop;
+        }
+
+        // Phase 9: if this action has an expectedState, run the QC loop.
+        // Rule-based check first; vision model only if inconclusive. The
+        // verification engine NEVER calls executeSingleAction — it is
+        // read-only (captures page state + calls vision API).
+        if (result.success && planned.expectedState && isVerifiableActionType(planned.action.type)) {
+          const verification = await verifyAction(page, planned.action, planned.expectedState, {
+            sceneId: scene.sceneId,
+            screenshotDir,
+            screenshotPrefix: `scene-${scene.order}-verify-${planned.id}`,
+          });
+          verifications[scene.sceneId][planned.id] = verification;
+
+          // Human review required → stop the run; the user must decide.
+          if (verification.outcome === "HUMAN_REVIEW") {
+            sceneOk = false;
+            overallSuccess = false;
+            sceneError = `Action requires human review: ${verification.verificationResult?.reason ?? "verification failed"}`;
+            errors.push({
+              sceneId: scene.sceneId,
+              action: summarize(planned.action),
+              message: sceneError,
+              screenshotPath: verification.pageState?.screenshotPath ?? undefined,
+              timestamp: nowIso(),
+            });
+            sceneResults.push({
+              sceneId: scene.sceneId,
+              title: scene.title,
+              order: scene.order,
+              startTime: sceneStart,
+              endTime: nowIso(),
+              screenshotPaths,
+              success: false,
+              error: sceneError,
+            });
+            break sceneLoop;
+          }
         }
 
         // Post-action settle delay for visible, deterministic frames.
@@ -254,6 +300,7 @@ export async function recordDemo(
       width: settings.viewportWidth,
       height: settings.viewportHeight,
     },
+    verifications: Object.keys(verifications).length > 0 ? verifications : undefined,
   };
 }
 

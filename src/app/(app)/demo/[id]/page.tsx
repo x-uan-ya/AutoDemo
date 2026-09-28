@@ -10,6 +10,7 @@ import { RecordingPanel } from "@/components/recording-panel";
 import { VoicePanel } from "@/components/voice-panel";
 import { RenderPanel } from "@/components/render-panel";
 import { MultilingualPanel } from "@/components/multilingual-panel";
+import { QualityCheckPanel } from "@/components/quality-check-panel";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { getRepository } from "@/lib/repository";
 import { displayHost, formatDate } from "@/lib/utils";
@@ -74,6 +75,12 @@ export default async function DemoDetailPage({
             actionsApproved={job.actionPlan?.status === "approved"}
             sceneTitles={(job.actionPlan?.scenes ?? []).map((s) => s.title)}
             initialRecording={job.recording}
+          />
+
+          <QualityCheckPanel
+            jobId={job.id}
+            hasRecording={!!job.recording?.success}
+            initialReport={job.qualityReport}
           />
 
           <div id="voice">

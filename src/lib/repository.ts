@@ -15,6 +15,7 @@ import type { VoiceOver, SceneAudio } from "@/lib/tts/types";
 import type { RenderResult } from "@/video/types";
 import type { LanguageVersion, Multilingual } from "@/lib/i18n/types";
 import type { DemoLanguageCode } from "@/lib/i18n/demo-language";
+import type { QualityReport } from "@/lib/browser/types";
 import type { DemoStatus } from "@/types";
 import { MOCK_JOBS } from "@/data/mock-jobs";
 import { createInitialPipeline } from "@/lib/pipeline";
@@ -89,6 +90,23 @@ export interface DemoJobRepository {
    * scenes. Recomputes the overall voice status.
    */
   updateSceneAudio(jobId: string, audio: SceneAudio): Promise<DemoJob | null>;
+
+  // ----- Phase 9: quality control -----
+  /** Store the QC report from the recording run. */
+  setQualityReport(
+    jobId: string,
+    report: QualityReport
+  ): Promise<DemoJob | null>;
+  /**
+   * Record a human review decision (RETRY/SKIP/ABORT) for a specific action.
+   * The actionId is "<sceneId>::<actionId>".
+   */
+  resolveHumanReview(
+    jobId: string,
+    sceneId: string,
+    actionId: string,
+    decision: "RETRY" | "SKIP" | "ABORT"
+  ): Promise<DemoJob | null>;
 
   // ----- Phase 7: render -----
   /**
@@ -553,6 +571,57 @@ class InMemoryDemoJobRepository implements DemoJobRepository {
       a.language.localeCompare(b.language)
     );
     job.multilingual = ml;
+    job.updatedAt = new Date().toISOString();
+    return job;
+  }
+
+  async setQualityReport(
+    jobId: string,
+    report: QualityReport
+  ): Promise<DemoJob | null> {
+    const job = this.jobs.find((j) => j.id === jobId);
+    if (!job) return null;
+    job.qualityReport = report;
+    job.updatedAt = new Date().toISOString();
+    return job;
+  }
+
+  async resolveHumanReview(
+    jobId: string,
+    sceneId: string,
+    actionId: string,
+    decision: "RETRY" | "SKIP" | "ABORT"
+  ): Promise<DemoJob | null> {
+    const job = this.jobs.find((j) => j.id === jobId);
+    if (!job) return null;
+
+    // Update the verification record inside the recording result.
+    const verif = job.recording?.verifications?.[sceneId]?.[actionId];
+    if (verif?.humanReview) {
+      verif.humanReview.decision = decision;
+      verif.humanReview.decidedAt = new Date().toISOString();
+      if (decision === "SKIP") verif.outcome = "SKIPPED_BY_USER";
+    }
+    // Mirror decision in the quality report action item.
+    if (job.qualityReport) {
+      for (const sr of job.qualityReport.sceneReports) {
+        if (sr.sceneId === sceneId) {
+          const item = sr.actions.find((a) => a.actionId === actionId);
+          if (item?.humanReview) {
+            item.humanReview.decision = decision;
+            item.humanReview.decidedAt = new Date().toISOString();
+            if (decision === "SKIP") {
+              item.outcome = "SKIPPED_BY_USER";
+              sr.humanReviewActions = Math.max(0, sr.humanReviewActions - 1);
+            }
+          }
+        }
+      }
+      // Recompute blocksRendering.
+      job.qualityReport.blocksRendering = job.qualityReport.sceneReports.some(
+        (sr) => sr.actions.some((a) => a.outcome === "HUMAN_REVIEW")
+      );
+    }
     job.updatedAt = new Date().toISOString();
     return job;
   }

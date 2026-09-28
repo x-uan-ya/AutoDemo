@@ -23,6 +23,9 @@ export type { RenderResult } from "@/video/types";
 // Phase 8 multilingual container lives with the i18n layer; re-exported here.
 import type { Multilingual } from "@/lib/i18n/types";
 export type { Multilingual } from "@/lib/i18n/types";
+// Phase 9 quality report lives with the browser layer; re-exported here.
+import type { QualityReport, HumanReviewContext } from "@/lib/browser/types";
+export type { QualityReport, HumanReviewContext } from "@/lib/browser/types";
 
 // ---------------------------------------------------------------------------
 // Enumerated option types (kept as string unions so they map cleanly to
@@ -276,6 +279,8 @@ export interface DemoJob {
   render?: RenderResult;
   /** Phase 8 multilingual versions (master script + per-language demos). */
   multilingual?: Multilingual;
+  /** Phase 9 quality control report, generated after recording. */
+  qualityReport?: QualityReport;
   scenes: DemoScene[];
   assets: VideoAsset[];
   createdAt: string;
