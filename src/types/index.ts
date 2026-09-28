@@ -20,6 +20,9 @@ export type { VoiceOver } from "@/lib/tts/types";
 // Phase 7 render result lives with the video layer; re-exported here.
 import type { RenderResult } from "@/video/types";
 export type { RenderResult } from "@/video/types";
+// Phase 8 multilingual container lives with the i18n layer; re-exported here.
+import type { Multilingual } from "@/lib/i18n/types";
+export type { Multilingual } from "@/lib/i18n/types";
 
 // ---------------------------------------------------------------------------
 // Enumerated option types (kept as string unions so they map cleanly to
@@ -271,6 +274,8 @@ export interface DemoJob {
   voiceOver?: VoiceOver;
   /** Phase 7 final rendered video result, if it has been rendered. */
   render?: RenderResult;
+  /** Phase 8 multilingual versions (master script + per-language demos). */
+  multilingual?: Multilingual;
   scenes: DemoScene[];
   assets: VideoAsset[];
   createdAt: string;

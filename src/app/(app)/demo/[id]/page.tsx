@@ -9,6 +9,7 @@ import { BrowserActionsPanel } from "@/components/browser-actions-panel";
 import { RecordingPanel } from "@/components/recording-panel";
 import { VoicePanel } from "@/components/voice-panel";
 import { RenderPanel } from "@/components/render-panel";
+import { MultilingualPanel } from "@/components/multilingual-panel";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { getRepository } from "@/lib/repository";
 import { displayHost, formatDate } from "@/lib/utils";
@@ -96,6 +97,14 @@ export default async function DemoDetailPage({
             voice={job.settings.voice}
             purpose={job.settings.purpose}
             initialRender={job.render}
+          />
+
+          <MultilingualPanel
+            jobId={job.id}
+            canGenerate={
+              job.plan?.status === "approved" && !!job.recording?.success
+            }
+            initialMultilingual={job.multilingual}
           />
         </div>
 

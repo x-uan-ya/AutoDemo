@@ -9,7 +9,7 @@ with browser automation, and renders a final video.
 
 > **Milestone status: foundation + Website Explorer + AI Feature Discovery +
 > Demo Planner + Browser Action Engine + Browser Recording + Voice Narration +
-> Video Rendering.** This repository
+> Video Rendering + Multilingual Generation.** This repository
 > contains the application shell, pages, reusable components, the data model, a
 > Playwright-based Website Explorer (passive snapshot of a site), an AI Feature
 > Discovery stage (evidence-grounded feature list from a multimodal LLM), a Demo
@@ -402,6 +402,56 @@ a recording and voice exist), render progress, then the final video player with
 duration/language/voice/purpose metadata and **Download**, **Regenerate Voice**,
 and **Regenerate Video** actions. Billing, auth, mobile, captions-as-editing,
 and AI video generation are out of scope.
+
+## Multilingual Demo Generation (Phase 8)
+
+Generates the same demo in multiple languages, reusing the browser recording.
+The English storyboard narration is the **master script** and is never
+overwritten. Each generated language produces a `LanguageVersion` with
+translated narration, separate audio, language-specific captions, and a
+separate rendered MP4 — all from the same recording screenshots.
+
+Files:
+
+- `src/lib/i18n/demo-language.ts` — language registry (`en`, `zh-CN`). Each
+  entry defines `languageCode`, `displayName`, `nativeName`, `locale`,
+  `ttsLanguage`, `captionLanguage`. Adding a new language is a single table
+  entry here + a TTS voice mapping.
+- `src/lib/ai/translation.ts` — `translateNarration`: translates the master
+  narration preserving brand names, feature names, technical terms, numbers,
+  and URLs. Natural adaptation (not word-for-word). Uses Amazon Bedrock Converse
+  when configured, otherwise an offline mock (English passthrough; other
+  languages get a `[locale]` prefix so the pipeline is exercisable without
+  cloud).
+- `src/lib/i18n/types.ts` — `LanguageSceneVersion`, `LanguageVersion`,
+  `Multilingual` (master narration snapshot + all language versions).
+- `src/lib/i18n/multilingual-generation.ts` — orchestrator: translate →
+  per-scene TTS under `public/voice/<jobId>/<code>/` → captions (from
+  translated narration) → render to `public/renders/<jobId>/demo-<code>.mp4`
+  (reuses recording screenshots, never re-runs the browser).
+
+Pipeline per language:
+1. Translate master narration into the target language.
+2. Generate TTS audio per scene (separate subdirectory per language).
+3. Build captions from the translated narration.
+4. Render a separate MP4 using the existing recording stills as the visual.
+
+The master English storyboard narration on `plan.scenes[].narration` is never
+touched; `Multilingual.masterNarration` snapshots it for provenance.
+
+Endpoint:
+
+```
+POST /api/demo/[id]/language/[code]   en | zh-CN
+  Guards: approved storyboard, completed recording, no duplicate.
+  Response: { success, language, status, videoPath, videoDuration, reusedRecording }
+```
+
+The `MultilingualPanel` on `/demo/[id]` shows a language selector (English /
+中文), a "Generate <language> Demo" button per language, progress, and separate
+video players + Download buttons for each generated language. Adding Malay,
+Japanese, or Korean requires one entry in the language registry and a TTS voice
+mapping — nothing else changes.
 
 ## Planned architecture
 

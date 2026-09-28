@@ -13,6 +13,8 @@ import type {
 } from "@/lib/browser/types";
 import type { VoiceOver, SceneAudio } from "@/lib/tts/types";
 import type { RenderResult } from "@/video/types";
+import type { LanguageVersion, Multilingual } from "@/lib/i18n/types";
+import type { DemoLanguageCode } from "@/lib/i18n/demo-language";
 import type { DemoStatus } from "@/types";
 import { MOCK_JOBS } from "@/data/mock-jobs";
 import { createInitialPipeline } from "@/lib/pipeline";
@@ -96,6 +98,25 @@ export interface DemoJobRepository {
   tryStartRender(jobId: string): Promise<boolean>;
   /** Store the render result and set the final status. Releases the slot. */
   finishRender(jobId: string, render: RenderResult): Promise<DemoJob | null>;
+
+  // ----- Phase 8: multilingual -----
+  /**
+   * Atomically claim the generation slot for a (job, language) pair. Returns
+   * false if that language is already generating (duplicate-job guard).
+   * Seeds the multilingual container from the master narration if needed.
+   */
+  tryStartLanguage(
+    jobId: string,
+    language: DemoLanguageCode
+  ): Promise<boolean>;
+  /**
+   * Upsert a completed/failed language version (by language code). Releases
+   * the slot. The master English storyboard narration is never modified.
+   */
+  upsertLanguageVersion(
+    jobId: string,
+    version: LanguageVersion
+  ): Promise<DemoJob | null>;
 }
 
 function generateId(): string {
@@ -124,6 +145,8 @@ class InMemoryDemoJobRepository implements DemoJobRepository {
   private voiceInFlight = new Set<string>();
   /** Job ids with an in-flight render job — the duplicate-job guard. */
   private renderInFlight = new Set<string>();
+  /** "<jobId>:<lang>" keys with an in-flight language generation. */
+  private languageInFlight = new Set<string>();
 
   constructor(seed: DemoJob[]) {
     // Clone so we never mutate the exported seed array.
@@ -478,6 +501,58 @@ class InMemoryDemoJobRepository implements DemoJobRepository {
       return step;
     });
     if (ok) job.status = "RENDER_COMPLETE";
+    job.updatedAt = new Date().toISOString();
+    return job;
+  }
+
+  async tryStartLanguage(
+    jobId: string,
+    language: DemoLanguageCode
+  ): Promise<boolean> {
+    const job = this.jobs.find((j) => j.id === jobId);
+    if (!job) return false;
+    const key = `${jobId}:${language}`;
+    if (this.languageInFlight.has(key)) return false;
+
+    // Seed the multilingual container (master narration snapshot) once.
+    if (!job.multilingual) {
+      job.multilingual = {
+        masterLanguage: "en",
+        masterNarration: [...(job.plan?.scenes ?? [])]
+          .sort((a, b) => a.order - b.order)
+          .map((s) => ({ sceneId: s.id, order: s.order, narration: s.narration })),
+        languageVersions: [],
+      };
+    }
+    this.languageInFlight.add(key);
+    job.updatedAt = new Date().toISOString();
+    return true;
+  }
+
+  async upsertLanguageVersion(
+    jobId: string,
+    version: LanguageVersion
+  ): Promise<DemoJob | null> {
+    const job = this.jobs.find((j) => j.id === jobId);
+    this.languageInFlight.delete(`${jobId}:${version.language}`);
+    if (!job) return null;
+
+    const ml: Multilingual = job.multilingual ?? {
+      masterLanguage: "en",
+      masterNarration: [...(job.plan?.scenes ?? [])]
+        .sort((a, b) => a.order - b.order)
+        .map((s) => ({ sceneId: s.id, order: s.order, narration: s.narration })),
+      languageVersions: [],
+    };
+
+    // Replace the version for this language (preserve all others).
+    const others = ml.languageVersions.filter(
+      (v) => v.language !== version.language
+    );
+    ml.languageVersions = [...others, version].sort((a, b) =>
+      a.language.localeCompare(b.language)
+    );
+    job.multilingual = ml;
     job.updatedAt = new Date().toISOString();
     return job;
   }

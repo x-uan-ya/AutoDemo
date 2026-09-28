@@ -36,6 +36,13 @@ export class RenderError extends Error {
 
 export interface RenderOptions {
   onProgress?: (stage: string, progress: number) => void;
+  /** Output filename (default "demo.mp4"). Phase 8 uses "demo-<code>.mp4". */
+  outputFileName?: string;
+  /**
+   * Pre-built timeline props. When provided (Phase 8 language render), these
+   * are rendered as-is instead of building from the job's master voiceOver.
+   */
+  props?: AutoDemoVideoProps;
 }
 
 export async function renderDemoVideo(
@@ -44,12 +51,14 @@ export async function renderDemoVideo(
 ): Promise<RenderResult> {
   const progress = options.onProgress ?? (() => {});
 
-  // Build the timeline props from the job's storyboard/recording/voice.
-  const props: AutoDemoVideoProps = buildTimeline(job, {
-    showCursor: false,
-    includeTitleCard: true,
-    includeEndCard: true,
-  });
+  // Use supplied props (a language timeline) or build from the master job.
+  const props: AutoDemoVideoProps =
+    options.props ??
+    buildTimeline(job, {
+      showCursor: false,
+      includeTitleCard: true,
+      includeEndCard: true,
+    });
 
   if (props.scenes.length === 0) {
     throw new RenderError("config", "There are no scenes to render.");
@@ -57,7 +66,7 @@ export async function renderDemoVideo(
 
   const outDir = path.join(RENDER_ROOT, job.id);
   await fs.mkdir(outDir, { recursive: true });
-  const outFile = path.join(outDir, "demo.mp4");
+  const outFile = path.join(outDir, options.outputFileName ?? "demo.mp4");
 
   // Lazy-load the heavy Remotion Node APIs.
   const { bundle } = await import("@remotion/bundler");
