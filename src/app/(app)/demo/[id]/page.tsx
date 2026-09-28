@@ -5,6 +5,7 @@ import { DemoSettings } from "@/components/demo-settings";
 import { ProgressPipeline } from "@/components/progress-pipeline";
 import { FeatureDiscoveryPanel } from "@/components/feature-discovery-panel";
 import { StoryboardPanel } from "@/components/storyboard-panel";
+import { BrowserActionsPanel } from "@/components/browser-actions-panel";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { getRepository } from "@/lib/repository";
 import { displayHost, formatDate } from "@/lib/utils";
@@ -56,6 +57,12 @@ export default async function DemoDetailPage({
             jobId={job.id}
             initialPlan={job.plan}
             hasFeatures={job.features.length > 0}
+          />
+
+          <BrowserActionsPanel
+            jobId={job.id}
+            initialActionPlan={job.actionPlan}
+            storyboardApproved={job.plan?.status === "approved"}
           />
         </div>
 

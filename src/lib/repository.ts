@@ -6,6 +6,10 @@ import type {
   DemoPlan,
   PlanScene,
 } from "@/types";
+import type {
+  ActionPlan,
+  PlannedBrowserAction,
+} from "@/lib/browser/types";
 import { MOCK_JOBS } from "@/data/mock-jobs";
 import { createInitialPipeline } from "@/lib/pipeline";
 
@@ -41,6 +45,16 @@ export interface DemoJobRepository {
   updatePlanScene(jobId: string, scene: PlanScene): Promise<DemoJob | null>;
   /** Approve the storyboard, locking it for the recording stage. */
   approvePlan(jobId: string): Promise<DemoJob | null>;
+  /** Store a freshly generated Phase 4 action plan (resets it to draft). */
+  setActionPlan(jobId: string, actionPlan: ActionPlan): Promise<DemoJob | null>;
+  /** Replace the actions of a single scene in the action plan. */
+  setSceneActions(
+    jobId: string,
+    sceneId: string,
+    actions: PlannedBrowserAction[]
+  ): Promise<DemoJob | null>;
+  /** Approve the action plan, unlocking (a later) recording stage. */
+  approveActionPlan(jobId: string): Promise<DemoJob | null>;
 }
 
 function generateId(): string {
@@ -230,6 +244,58 @@ class InMemoryDemoJobRepository implements DemoJobRepository {
         ? { ...step, status: "active" }
         : step
     );
+  }
+
+  async setActionPlan(
+    jobId: string,
+    actionPlan: ActionPlan
+  ): Promise<DemoJob | null> {
+    const job = this.jobs.find((j) => j.id === jobId);
+    if (!job) return null;
+    job.actionPlan = actionPlan;
+    job.updatedAt = new Date().toISOString();
+    // Recording stage becomes active once actions exist (still gated on
+    // action-plan approval before it can run).
+    job.pipeline = job.pipeline.map((step) =>
+      step.stage === "recording" && step.status === "pending"
+        ? { ...step, status: "active" }
+        : step
+    );
+    return job;
+  }
+
+  async setSceneActions(
+    jobId: string,
+    sceneId: string,
+    actions: PlannedBrowserAction[]
+  ): Promise<DemoJob | null> {
+    const job = this.jobs.find((j) => j.id === jobId);
+    if (!job || !job.actionPlan) return null;
+
+    const scene = job.actionPlan.scenes.find((s) => s.sceneId === sceneId);
+    if (!scene) return null;
+
+    scene.actions = actions;
+    // Any edit un-approves the action plan and recomputes the flagged summary.
+    job.actionPlan.status = "draft";
+    job.actionPlan.approvedAt = undefined;
+    job.actionPlan.hasFlaggedActions = job.actionPlan.scenes.some((s) =>
+      s.actions.some((a) => a.requiresHumanApproval)
+    );
+    job.updatedAt = new Date().toISOString();
+    return job;
+  }
+
+  async approveActionPlan(jobId: string): Promise<DemoJob | null> {
+    const job = this.jobs.find((j) => j.id === jobId);
+    if (!job || !job.actionPlan || job.actionPlan.scenes.length === 0) {
+      return null;
+    }
+    const now = new Date().toISOString();
+    job.actionPlan.status = "approved";
+    job.actionPlan.approvedAt = now;
+    job.updatedAt = now;
+    return job;
   }
 }
 

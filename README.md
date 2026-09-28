@@ -8,13 +8,15 @@ features, plans a walkthrough storyboard, generates narration, records the site
 with browser automation, and renders a final video.
 
 > **Milestone status: foundation + Website Explorer + AI Feature Discovery +
-> Demo Planner.** This repository contains the application shell, pages,
-> reusable components, the data model, a Playwright-based Website Explorer
-> (passive snapshot of a site), an AI Feature Discovery stage (evidence-grounded
-> feature list from a multimodal LLM), and a Demo Planner that turns selected
-> features into an editable, duration-aware, purpose-differentiated storyboard
-> with an approval gate. It does not yet perform video recording, text-to-speech,
-> or rendering.
+> Demo Planner + Browser Action Engine.** This repository contains the
+> application shell, pages, reusable components, the data model, a
+> Playwright-based Website Explorer (passive snapshot of a site), an AI Feature
+> Discovery stage (evidence-grounded feature list from a multimodal LLM), a Demo
+> Planner that turns selected features into an editable, duration-aware,
+> purpose-differentiated storyboard with an approval gate, and a Browser Action
+> Engine that converts an approved storyboard into safe, allowlisted browser
+> actions with a Playwright executor. It does not yet perform video recording,
+> text-to-speech, or rendering.
 
 ## Current functionality
 
@@ -201,6 +203,58 @@ PUT  /api/demo/[id]/plan                              Replace scenes (edit/reord
 POST /api/demo/[id]/plan/approve                      Approve (unlock recording)
 POST /api/demo/[id]/plan/scene/[sceneId]/regenerate   Regenerate one scene
 ```
+
+## Browser Action Engine (Phase 4)
+
+Converts an **approved** storyboard into safe, structured browser actions that a
+Playwright executor can later run. The system never generates arbitrary
+JavaScript — the AI (and any client edit) may only produce actions from a fixed
+allowlist.
+
+Files (`src/lib/browser/`):
+
+- `types.ts` — the `BrowserAction` discriminated union (navigate, click, fill,
+  select, scroll, wait, hover, press, screenshot), plus `PlannedBrowserAction`,
+  `SceneActionSet`, `ActionPlan`, and `ActionExecutionResult`.
+- `schemas.ts` — strict Zod schemas for every action. Rejects arbitrary
+  JavaScript, `eval`, `Function`, shell/`exec`/`spawn`, filesystem access,
+  `fetch`/XHR, `require`/dynamic import, `<script>`/`<iframe>`, inline event
+  handlers, and `javascript:`/`data:`/`file:`/`chrome:`/`about:` URLs. `.strict()`
+  rejects unknown keys.
+- `action-security.ts` — `checkNavigationTarget` (https-only, same-domain as the
+  approved site, internal/loopback/metadata IPs blocked by reusing the
+  explorer's SSRF blocklist) and `flagDestructiveAction` (marks
+  delete/checkout/logout/payment/purchase/send/publish/change-password/etc as
+  `requiresHumanApproval`).
+- `action-planner.ts` — `generateActionPlan` maps each approved scene to
+  allowlisted actions using robust selectors (data-testid → role/name → label →
+  visible text → stable CSS; avoids nth-child, generated classes, deep chains).
+  Every synthesized action is validated by the Zod schema. This module is
+  deterministic and has no AI-provider imports (provider logic stays in the AI
+  layer).
+- `playwright-executor.ts` — `executeActions` runs actions in headless Chromium.
+  It re-validates each action, blocks off-domain/internal navigation, refuses
+  flagged actions unless explicitly allowed, and before every
+  click/fill/select/hover checks the target exists and is visible with a bounded
+  timeout. It returns an `ActionExecutionResult` for every action — errors are
+  never swallowed.
+
+The preview UI (`BrowserActionsPanel`) appears on `/demo/[id]` once the
+storyboard is approved. It lists actions per scene (type, description, selector,
+status), flags sensitive actions as "needs approval", and lets the user
+regenerate, edit descriptions, delete, and reorder actions before clicking
+**Approve Browser Actions**. Any edit resets the plan to draft.
+
+Endpoints:
+
+```
+POST /api/demo/[id]/actions           Generate actions from the approved storyboard
+PUT  /api/demo/[id]/actions           Replace a scene's actions (edit/delete/reorder)
+POST /api/demo/[id]/actions/approve   Approve the action plan
+GET  /api/dev/action-test             Dev-only: run navigate/click/scroll/screenshot on example.com
+```
+
+Recording is a later phase and is not started here.
 
 ## Planned architecture
 

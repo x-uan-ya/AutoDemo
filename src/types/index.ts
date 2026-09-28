@@ -9,6 +9,11 @@
  * Nothing in this file performs work. It only describes data.
  */
 
+// The Phase 4 browser action plan is defined alongside the executor/types in
+// the browser layer; re-exported here so the aggregate can reference it.
+import type { ActionPlan } from "@/lib/browser/types";
+export type { ActionPlan } from "@/lib/browser/types";
+
 // ---------------------------------------------------------------------------
 // Enumerated option types (kept as string unions so they map cleanly to
 // PostgreSQL enums / check constraints later).
@@ -232,6 +237,8 @@ export interface DemoJob {
   discoveryMeta?: FeatureDiscoveryMeta;
   /** The generated storyboard, if the planning stage has run. */
   plan?: DemoPlan;
+  /** Phase 4 browser action plan, if it has been generated. */
+  actionPlan?: ActionPlan;
   scenes: DemoScene[];
   assets: VideoAsset[];
   createdAt: string;
