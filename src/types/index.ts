@@ -149,6 +149,54 @@ export interface DemoScene {
 }
 
 /**
+ * A scene in the demo plan (storyboard), produced by the Demo Planner stage.
+ *
+ * This is the planning-time representation the user reviews and edits. It is
+ * distinct from `DemoScene` (the recording-time representation with concrete
+ * browser actions), which is derived later once the storyboard is approved.
+ */
+export interface PlanScene {
+  id: string;
+  /** 1-based position in the storyboard. */
+  order: number;
+  /** The discovered feature this scene showcases. */
+  featureId: string;
+  title: string;
+  /** What the viewer should understand after this scene. */
+  objective: string;
+  /** Spoken narration. Grounded in the feature's evidence. */
+  narration: string;
+  /** Planned scene length in seconds. */
+  estimatedDuration: number;
+  /** Placeholder for recording actions; populated in a later milestone. */
+  actions: BrowserAction[];
+  /** Evidence strings supporting the narration. */
+  evidence: string[];
+}
+
+export type PlanStatus = "draft" | "approved";
+
+/**
+ * The generated storyboard for a demo, plus the settings snapshot it was
+ * generated against and its approval state. Recording must not begin until
+ * `status` is "approved".
+ */
+export interface DemoPlan {
+  scenes: PlanScene[];
+  status: PlanStatus;
+  /** Target duration (seconds) the plan was built for. */
+  targetSeconds: number;
+  /** The purpose the plan was generated for (plans differ by purpose). */
+  purpose: DemoPurpose;
+  provider: string;
+  model: string;
+  /** When the plan was last generated/regenerated (ISO 8601). */
+  generatedAt: string;
+  /** When the plan was approved, if it has been. */
+  approvedAt?: string;
+}
+
+/**
  * A rendered or intermediate media asset (screen recording clip, audio track,
  * final video). Produced by later stages.
  */
@@ -182,6 +230,8 @@ export interface DemoJob {
   features: DiscoveredFeature[];
   /** Metadata about the AI call that produced `features`, if it has run. */
   discoveryMeta?: FeatureDiscoveryMeta;
+  /** The generated storyboard, if the planning stage has run. */
+  plan?: DemoPlan;
   scenes: DemoScene[];
   assets: VideoAsset[];
   createdAt: string;

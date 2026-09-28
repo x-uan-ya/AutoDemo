@@ -1,4 +1,5 @@
 import type { WebsiteExploration } from "@/lib/browser/types";
+import type { DiscoveredFeature } from "@/types";
 import {
   featureDiscoveryResponseSchema,
   FEATURE_TOOL_INPUT_SCHEMA,
@@ -8,6 +9,20 @@ import {
   FEATURE_DISCOVERY_SYSTEM_PROMPT,
   buildFeatureDiscoveryUserText,
 } from "./prompts";
+import {
+  planResponseSchema,
+  singleSceneResponseSchema,
+  PLAN_TOOL_INPUT_SCHEMA,
+  SINGLE_SCENE_TOOL_INPUT_SCHEMA,
+  type PlanResponse,
+  type SingleSceneResponse,
+} from "@/lib/planner/schemas";
+import {
+  PLANNER_SYSTEM_PROMPT,
+  buildPlannerUserText,
+  buildSceneRegenUserText,
+  type PlannerContext,
+} from "@/lib/planner/prompts";
 
 /**
  * AI provider abstraction.
@@ -42,6 +57,27 @@ export interface DiscoverFeaturesResult {
   usage: AiUsage;
 }
 
+export interface PlanDemoInput {
+  features: DiscoveredFeature[];
+  context: PlannerContext;
+}
+
+export interface PlanDemoResult {
+  response: PlanResponse;
+  usage: AiUsage;
+}
+
+export interface RegenerateSceneInput {
+  feature: DiscoveredFeature;
+  context: PlannerContext;
+  guidance?: string;
+}
+
+export interface RegenerateSceneResult {
+  response: SingleSceneResponse;
+  usage: AiUsage;
+}
+
 export interface MultimodalAiProvider {
   readonly name: string;
   /**
@@ -51,6 +87,16 @@ export interface MultimodalAiProvider {
   discoverFeatures(
     input: DiscoverFeaturesInput
   ): Promise<DiscoverFeaturesResult>;
+  /**
+   * Turn selected features into a validated scene-by-scene demo plan.
+   */
+  planDemo(input: PlanDemoInput): Promise<PlanDemoResult>;
+  /**
+   * Regenerate the narration/objective for a single scene's feature.
+   */
+  regenerateScene(
+    input: RegenerateSceneInput
+  ): Promise<RegenerateSceneResult>;
 }
 
 export class AiError extends Error {
@@ -68,7 +114,14 @@ export class AiError extends Error {
 
 const DEFAULT_MODEL_ID = "us.anthropic.claude-sonnet-4-6";
 const TOOL_NAME = "report_features";
+const PLAN_TOOL_NAME = "report_plan";
+const SCENE_TOOL_NAME = "report_scene";
 const MAX_TOKENS = 4096;
+
+/** Content block accepted by the Converse API (text or image). */
+type ConverseContentBlock =
+  | { text: string }
+  | { image: { format: "png" | "jpeg"; source: { bytes: Uint8Array } } };
 
 /**
  * Per-1K-token pricing (USD) by model id, used to estimate cost. Pricing
@@ -111,10 +164,20 @@ class BedrockAiProvider implements MultimodalAiProvider {
     this.region = region;
   }
 
-  async discoverFeatures(
-    input: DiscoverFeaturesInput
-  ): Promise<DiscoverFeaturesResult> {
-    // Imported lazily so the SDK is only loaded when Bedrock is actually used.
+  /**
+   * Shared Converse + forced-tool-use call. Sends the content, forces the
+   * model to answer via the named tool, and returns the raw tool input plus
+   * usage. Callers validate the tool input with their own Zod schema.
+   */
+  private async runTool(params: {
+    logLabel: string;
+    system: string;
+    content: ConverseContentBlock[];
+    toolName: string;
+    toolDescription: string;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    toolSchema: any;
+  }): Promise<{ input: unknown; usage: AiUsage }> {
     const {
       BedrockRuntimeClient,
       ConverseCommand,
@@ -126,49 +189,27 @@ class BedrockAiProvider implements MultimodalAiProvider {
       retryMode: "adaptive",
     });
 
-    const userText = buildFeatureDiscoveryUserText(
-      input.exploration,
-      input.context
-    );
-
-    // Build the multimodal content: text + up to two screenshots.
-    const content: Record<string, unknown>[] = [{ text: userText }];
-    for (const shot of input.exploration.screenshots.slice(0, 2)) {
-      const img = dataUrlToImageBytes(shot.dataUrl);
-      if (img) {
-        content.push({
-          image: { format: img.format, source: { bytes: img.bytes } },
-        });
-      }
-    }
-
     const started = Date.now();
     let response;
     try {
       response = await client.send(
         new ConverseCommand({
           modelId: this.model,
-          system: [{ text: FEATURE_DISCOVERY_SYSTEM_PROMPT }],
+          system: [{ text: params.system }],
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          messages: [{ role: "user", content: content as any }],
+          messages: [{ role: "user", content: params.content as any }],
           inferenceConfig: { maxTokens: MAX_TOKENS, temperature: 0 },
           toolConfig: {
             tools: [
               {
                 toolSpec: {
-                  name: TOOL_NAME,
-                  description:
-                    "Report the product features discovered on the page.",
-                  inputSchema: {
-                    // The SDK types the schema as DocumentType (JSON value).
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    json: FEATURE_TOOL_INPUT_SCHEMA as any,
-                  },
+                  name: params.toolName,
+                  description: params.toolDescription,
+                  inputSchema: { json: params.toolSchema },
                 },
               },
             ],
-            // Force the model to answer via the tool.
-            toolChoice: { tool: { name: TOOL_NAME } },
+            toolChoice: { tool: { name: params.toolName } },
           },
         })
       );
@@ -176,8 +217,6 @@ class BedrockAiProvider implements MultimodalAiProvider {
       const message = err instanceof Error ? err.message : String(err);
       throw new AiError("provider", `Bedrock request failed: ${message}`);
     }
-
-    const durationMs = Date.now() - started;
 
     const inputTokens = response.usage?.inputTokens ?? null;
     const outputTokens = response.usage?.outputTokens ?? null;
@@ -190,33 +229,110 @@ class BedrockAiProvider implements MultimodalAiProvider {
     const usage: AiUsage = {
       provider: this.name,
       model: this.model,
-      durationMs,
+      durationMs: Date.now() - started,
       inputTokens,
       outputTokens,
       totalTokens,
       estimatedCostUsd: estimateCost(this.model, inputTokens, outputTokens),
     };
+    logUsage(params.logLabel, usage);
 
-    // Extract the tool-use input block.
     const toolBlock = response.output?.message?.content?.find(
       (b) => b.toolUse
     )?.toolUse;
     if (!toolBlock?.input) {
       throw new AiError(
         "invalid_response",
-        "The model did not return structured features."
+        "The model did not return structured output."
       );
     }
+    return { input: toolBlock.input, usage };
+  }
 
-    const parsed = featureDiscoveryResponseSchema.safeParse(toolBlock.input);
+  async discoverFeatures(
+    input: DiscoverFeaturesInput
+  ): Promise<DiscoverFeaturesResult> {
+    const content: ConverseContentBlock[] = [
+      { text: buildFeatureDiscoveryUserText(input.exploration, input.context) },
+    ];
+    for (const shot of input.exploration.screenshots.slice(0, 2)) {
+      const img = dataUrlToImageBytes(shot.dataUrl);
+      if (img) {
+        content.push({
+          image: { format: img.format, source: { bytes: img.bytes } },
+        });
+      }
+    }
+
+    const { input: toolInput, usage } = await this.runTool({
+      logLabel: "feature_discovery",
+      system: FEATURE_DISCOVERY_SYSTEM_PROMPT,
+      content,
+      toolName: TOOL_NAME,
+      toolDescription: "Report the product features discovered on the page.",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      toolSchema: FEATURE_TOOL_INPUT_SCHEMA as any,
+    });
+
+    const parsed = featureDiscoveryResponseSchema.safeParse(toolInput);
     if (!parsed.success) {
       throw new AiError(
         "invalid_response",
         `Model output failed validation: ${parsed.error.issues[0]?.message}`
       );
     }
+    return { response: parsed.data, usage };
+  }
 
-    logUsage(usage);
+  async planDemo(input: PlanDemoInput): Promise<PlanDemoResult> {
+    const { input: toolInput, usage } = await this.runTool({
+      logLabel: "demo_plan",
+      system: PLANNER_SYSTEM_PROMPT,
+      content: [{ text: buildPlannerUserText(input.features, input.context) }],
+      toolName: PLAN_TOOL_NAME,
+      toolDescription: "Report the scene-by-scene demo plan.",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      toolSchema: PLAN_TOOL_INPUT_SCHEMA as any,
+    });
+
+    const parsed = planResponseSchema.safeParse(toolInput);
+    if (!parsed.success) {
+      throw new AiError(
+        "invalid_response",
+        `Plan output failed validation: ${parsed.error.issues[0]?.message}`
+      );
+    }
+    return { response: parsed.data, usage };
+  }
+
+  async regenerateScene(
+    input: RegenerateSceneInput
+  ): Promise<RegenerateSceneResult> {
+    const { input: toolInput, usage } = await this.runTool({
+      logLabel: "scene_regen",
+      system: PLANNER_SYSTEM_PROMPT,
+      content: [
+        {
+          text: buildSceneRegenUserText(
+            input.feature,
+            input.context,
+            input.guidance
+          ),
+        },
+      ],
+      toolName: SCENE_TOOL_NAME,
+      toolDescription: "Report a single regenerated demo scene.",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      toolSchema: SINGLE_SCENE_TOOL_INPUT_SCHEMA as any,
+    });
+
+    const parsed = singleSceneResponseSchema.safeParse(toolInput);
+    if (!parsed.success) {
+      throw new AiError(
+        "invalid_response",
+        `Scene output failed validation: ${parsed.error.issues[0]?.message}`
+      );
+    }
     return { response: parsed.data, usage };
   }
 }
@@ -251,9 +367,100 @@ class MockAiProvider implements MultimodalAiProvider {
       totalTokens: null,
       estimatedCostUsd: 0,
     };
-    logUsage(usage);
+    logUsage("feature_discovery", usage);
     return { response: validated, usage };
   }
+
+  async planDemo(input: PlanDemoInput): Promise<PlanDemoResult> {
+    const started = Date.now();
+    const scenes = input.features.map((f) =>
+      buildMockScene(f, input.context)
+    );
+    const validated = planResponseSchema.parse({ scenes });
+    await new Promise((r) => setTimeout(r, 200));
+
+    const usage: AiUsage = {
+      provider: this.name,
+      model: "mock-deterministic-v1",
+      durationMs: Date.now() - started,
+      inputTokens: null,
+      outputTokens: null,
+      totalTokens: null,
+      estimatedCostUsd: 0,
+    };
+    logUsage("demo_plan", usage);
+    return { response: validated, usage };
+  }
+
+  async regenerateScene(
+    input: RegenerateSceneInput
+  ): Promise<RegenerateSceneResult> {
+    const started = Date.now();
+    // Vary the mock narration slightly so "regenerate" produces a visibly
+    // different result.
+    const scene = buildMockScene(input.feature, input.context, input.guidance);
+    const validated = singleSceneResponseSchema.parse({ scene });
+    await new Promise((r) => setTimeout(r, 150));
+
+    const usage: AiUsage = {
+      provider: this.name,
+      model: "mock-deterministic-v1",
+      durationMs: Date.now() - started,
+      inputTokens: null,
+      outputTokens: null,
+      totalTokens: null,
+      estimatedCostUsd: 0,
+    };
+    logUsage("scene_regen", usage);
+    return { response: validated, usage };
+  }
+}
+
+/**
+ * Build a deterministic mock scene for a feature, honouring the same
+ * evidence-only rule and roughly hitting the per-scene word target so the mock
+ * behaves like the real planner for testing.
+ */
+function buildMockScene(
+  feature: DiscoveredFeature,
+  ctx: PlannerContext,
+  guidance?: string
+): PlanResponse["scenes"][number] {
+  const evidenceText =
+    feature.evidence.length > 0
+      ? feature.evidence.join("; ")
+      : feature.name;
+
+  // Purpose-flavoured opener so different purposes read differently.
+  const opener: Record<string, string> = {
+    hackathon_demo: `Here is what makes ${feature.name} stand out:`,
+    customer_tutorial: `Let's walk through ${feature.name} step by step.`,
+    portfolio_demo: `Take a look at ${feature.name} and how it's built.`,
+    product_overview: `Next up is ${feature.name}.`,
+    sales_demo: `${feature.name} helps you get more done.`,
+  };
+
+  const lead = opener[ctx.purpose] ?? `Next up is ${feature.name}.`;
+  const guidanceNote = guidance ? ` ${guidance.trim()}` : "";
+
+  // Compose narration around the observed evidence, padded toward the target
+  // word count without inventing capabilities.
+  const narration =
+    `${lead} ${feature.description} ` +
+    `On the page we can see ${evidenceText}, which is what this scene highlights.` +
+    guidanceNote;
+
+  return {
+    featureId: feature.id,
+    title: feature.name,
+    objective: `Help the ${ctx.audience || "viewer"} understand ${feature.name} using only what is visible on the page.`,
+    narration,
+    estimatedDuration: Math.max(
+      6,
+      Math.round(ctx.durationPlan.perSceneSpeakingSeconds)
+    ),
+    evidence: feature.evidence.slice(0, 6),
+  };
 }
 
 function deriveMockFeatures(exploration: WebsiteExploration) {
@@ -323,11 +530,11 @@ function deriveMockFeatures(exploration: WebsiteExploration) {
 // Logging + provider selection
 // ---------------------------------------------------------------------------
 
-function logUsage(usage: AiUsage): void {
+function logUsage(label: string, usage: AiUsage): void {
   // Structured, single-line log for observability. In production this would go
   // to a metrics sink; console is sufficient for this milestone.
   console.info(
-    "[ai.feature_discovery] " +
+    `[ai.${label}] ` +
       JSON.stringify({
         provider: usage.provider,
         model: usage.model,

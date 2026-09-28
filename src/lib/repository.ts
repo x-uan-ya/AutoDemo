@@ -3,6 +3,8 @@ import type {
   DemoSettings,
   DiscoveredFeature,
   FeatureDiscoveryMeta,
+  DemoPlan,
+  PlanScene,
 } from "@/types";
 import { MOCK_JOBS } from "@/data/mock-jobs";
 import { createInitialPipeline } from "@/lib/pipeline";
@@ -31,6 +33,14 @@ export interface DemoJobRepository {
     featureId: string,
     selected: boolean
   ): Promise<DemoJob | null>;
+  /** Store a freshly generated storyboard (resets it to draft). */
+  setPlan(jobId: string, plan: DemoPlan): Promise<DemoJob | null>;
+  /** Replace a job's plan scenes (edit narration, reorder, remove). Re-numbers order. */
+  setPlanScenes(jobId: string, scenes: PlanScene[]): Promise<DemoJob | null>;
+  /** Replace a single scene by id (e.g. after regeneration). */
+  updatePlanScene(jobId: string, scene: PlanScene): Promise<DemoJob | null>;
+  /** Approve the storyboard, locking it for the recording stage. */
+  approvePlan(jobId: string): Promise<DemoJob | null>;
 }
 
 function generateId(): string {
@@ -131,6 +141,95 @@ class InMemoryDemoJobRepository implements DemoJobRepository {
     feature.selected = selected;
     job.updatedAt = new Date().toISOString();
     return job;
+  }
+
+  async setPlan(jobId: string, plan: DemoPlan): Promise<DemoJob | null> {
+    const job = this.jobs.find((j) => j.id === jobId);
+    if (!job) return null;
+
+    job.plan = plan;
+    job.updatedAt = new Date().toISOString();
+
+    // Planning has produced a draft; mark the stage active (not completed —
+    // that happens on approval). Feature discovery is implied complete.
+    job.pipeline = job.pipeline.map((step) => {
+      if (
+        step.stage === "website_analysis" ||
+        step.stage === "feature_discovery"
+      ) {
+        return { ...step, status: "completed" };
+      }
+      if (step.stage === "demo_planning") {
+        return { ...step, status: "active" };
+      }
+      return step;
+    });
+    if (job.status === "ready_for_exploration") job.status = "in_progress";
+
+    return job;
+  }
+
+  async setPlanScenes(
+    jobId: string,
+    scenes: PlanScene[]
+  ): Promise<DemoJob | null> {
+    const job = this.jobs.find((j) => j.id === jobId);
+    if (!job || !job.plan) return null;
+
+    // Re-number order and reset to draft: any structural edit un-approves.
+    job.plan.scenes = scenes.map((s, i) => ({ ...s, order: i + 1 }));
+    job.plan.status = "draft";
+    job.plan.approvedAt = undefined;
+    job.plan.generatedAt = new Date().toISOString();
+    job.updatedAt = new Date().toISOString();
+    this.markPlanningActive(job);
+    return job;
+  }
+
+  async updatePlanScene(
+    jobId: string,
+    scene: PlanScene
+  ): Promise<DemoJob | null> {
+    const job = this.jobs.find((j) => j.id === jobId);
+    if (!job || !job.plan) return null;
+
+    const idx = job.plan.scenes.findIndex((s) => s.id === scene.id);
+    if (idx === -1) return null;
+
+    job.plan.scenes[idx] = { ...scene, order: idx + 1 };
+    // Editing a scene un-approves the storyboard.
+    job.plan.status = "draft";
+    job.plan.approvedAt = undefined;
+    job.updatedAt = new Date().toISOString();
+    this.markPlanningActive(job);
+    return job;
+  }
+
+  async approvePlan(jobId: string): Promise<DemoJob | null> {
+    const job = this.jobs.find((j) => j.id === jobId);
+    if (!job || !job.plan || job.plan.scenes.length === 0) return null;
+
+    const now = new Date().toISOString();
+    job.plan.status = "approved";
+    job.plan.approvedAt = now;
+    job.updatedAt = now;
+
+    // Approval completes the planning stage and unlocks recording.
+    job.pipeline = job.pipeline.map((step) =>
+      step.stage === "demo_planning"
+        ? { ...step, status: "completed" }
+        : step
+    );
+    return job;
+  }
+
+  /** Ensure the demo_planning stage shows as active while a draft exists. */
+  private markPlanningActive(job: DemoJob): void {
+    job.pipeline = job.pipeline.map((step) =>
+      step.stage === "demo_planning" && step.status !== "completed"
+        ? { ...step, status: "active" }
+        : step
+    );
   }
 }
 

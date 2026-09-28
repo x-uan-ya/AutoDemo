@@ -28,3 +28,12 @@ export function displayHost(url: string): string {
     return url;
   }
 }
+
+/** Format a number of seconds as compact m:ss or "Ns". */
+export function formatSeconds(totalSeconds: number): string {
+  const s = Math.max(0, Math.round(totalSeconds));
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  const rem = s % 60;
+  return `${m}:${rem.toString().padStart(2, "0")}`;
+}

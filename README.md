@@ -7,13 +7,14 @@ long-term goal is a system that explores the site, identifies important
 features, plans a walkthrough storyboard, generates narration, records the site
 with browser automation, and renders a final video.
 
-> **Milestone status: foundation + Website Explorer + AI Feature Discovery.**
-> This repository contains the application shell, pages, reusable components,
-> the data model, a Playwright-based Website Explorer (passive snapshot of a
-> site), and an AI Feature Discovery stage that turns that snapshot into an
-> evidence-grounded, structured feature list via a multimodal LLM. It does not
-> yet perform autonomous browser interaction, text-to-speech, or video
-> rendering.
+> **Milestone status: foundation + Website Explorer + AI Feature Discovery +
+> Demo Planner.** This repository contains the application shell, pages,
+> reusable components, the data model, a Playwright-based Website Explorer
+> (passive snapshot of a site), an AI Feature Discovery stage (evidence-grounded
+> feature list from a multimodal LLM), and a Demo Planner that turns selected
+> features into an editable, duration-aware, purpose-differentiated storyboard
+> with an approval gate. It does not yet perform video recording, text-to-speech,
+> or rendering.
 
 ## Current functionality
 
@@ -161,6 +162,45 @@ safe-to-demo badge, and can be selected or deselected for the demo.
 > Configure the provider in `.env.local` (see `.env.example`): set `AWS_REGION`
 > and optionally `BEDROCK_MODEL_ID` for Bedrock, or `AUTODEMO_AI_PROVIDER=mock`
 > to force the offline mock.
+
+## Demo Planner
+
+The third backend capability. It turns the selected features into a
+scene-by-scene **storyboard** — a `DemoPlan` of `PlanScene`s, each with
+`order`, `featureId`, `title`, `objective`, `narration`, `estimatedDuration`,
+`actions` (populated later), and `evidence`.
+
+Key behaviors (`src/lib/planner/`):
+
+- **Respects duration by scene count, not by trimming.** `duration-planner.ts`
+  maps the requested length to a target and decides how many features fit (30s
+  → 2 scenes, 60s → up to 4, 90s → up to 5, 120s → up to 7). A short demo covers
+  fewer, higher-value features rather than cramming a shortened script. It also
+  budgets a per-scene word target (~2.5 words/sec) and estimates speaking time.
+- **Different purposes produce different plans.** `prompts.ts` carries
+  purpose-specific guidance so the same features yield a Hackathon plan
+  (innovation, impact), a Customer Tutorial (step-by-step, plain language), a
+  Portfolio plan (architecture, implementation), etc.
+- **Evidence-grounded narration.** The planner may only use information
+  supported by the features' evidence; output is validated with Zod.
+- Uses the same `MultimodalAiProvider` abstraction (Bedrock or mock) as
+  Feature Discovery.
+
+The storyboard is shown on `/demo/[id]` with live metrics (scene count, planned
+duration, estimated speaking time, target). The user can **edit narration**,
+**reorder**, **remove**, and **regenerate** individual scenes, then click
+**Approve Storyboard**. Any structural edit resets the plan to `draft`.
+Recording is gated on approval: approving completes the `demo_planning`
+pipeline stage; recording must not start until then.
+
+Endpoints:
+
+```
+POST /api/demo/[id]/plan                              Generate the storyboard
+PUT  /api/demo/[id]/plan                              Replace scenes (edit/reorder/remove)
+POST /api/demo/[id]/plan/approve                      Approve (unlock recording)
+POST /api/demo/[id]/plan/scene/[sceneId]/regenerate   Regenerate one scene
+```
 
 ## Planned architecture
 
