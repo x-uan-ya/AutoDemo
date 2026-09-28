@@ -8,15 +8,16 @@ features, plans a walkthrough storyboard, generates narration, records the site
 with browser automation, and renders a final video.
 
 > **Milestone status: foundation + Website Explorer + AI Feature Discovery +
-> Demo Planner + Browser Action Engine.** This repository contains the
-> application shell, pages, reusable components, the data model, a
+> Demo Planner + Browser Action Engine + Browser Recording.** This repository
+> contains the application shell, pages, reusable components, the data model, a
 > Playwright-based Website Explorer (passive snapshot of a site), an AI Feature
 > Discovery stage (evidence-grounded feature list from a multimodal LLM), a Demo
 > Planner that turns selected features into an editable, duration-aware,
-> purpose-differentiated storyboard with an approval gate, and a Browser Action
+> purpose-differentiated storyboard with an approval gate, a Browser Action
 > Engine that converts an approved storyboard into safe, allowlisted browser
-> actions with a Playwright executor. It does not yet perform video recording,
-> text-to-speech, or rendering.
+> actions, and a deterministic Browser Recorder that executes those actions in
+> Playwright and produces a video. It does not yet perform text-to-speech,
+> captions, or video composition/rendering.
 
 ## Current functionality
 
@@ -254,7 +255,53 @@ POST /api/demo/[id]/actions/approve   Approve the action plan
 GET  /api/dev/action-test             Dev-only: run navigate/click/scroll/screenshot on example.com
 ```
 
-Recording is a later phase and is not started here.
+Recording is handled by Phase 5 (below); it is gated on this approval.
+
+## Browser Recording (Phase 5)
+
+Once browser actions are approved, AutoDemo launches Playwright, executes the
+approved `BrowserAction[]` scene by scene, and produces a deterministic,
+reproducible video recording. No voice/captions are added at this stage.
+
+Files:
+
+- `src/lib/video/recording-settings.ts` — configurable recording settings
+  (viewport, defaulting to 1440x900, `deviceScaleFactor`, `fps`, `videoFormat`
+  webm, `browser` chromium, `animationDelay`, `actionTimeout`). Overridable via
+  `AUTODEMO_REC_*` env vars.
+- `src/lib/browser/recorder.ts` — `recordDemo`: launches Chromium with a fixed
+  viewport + scale factor and `reducedMotion` for determinism, records the whole
+  session to WebM, executes each scene's actions (reusing the executor's
+  validation + security), captures a start and end screenshot per scene, and
+  returns a `RecordingResult`. Artifacts are written under
+  `public/recordings/<jobId>/` (gitignored) so the video is served statically.
+- Types `RecordingSceneResult` and `RecordingResult` (in `browser/types.ts`)
+  capture per-scene timing/screenshots/success and the overall
+  video path, duration, scenes, screenshots, and errors.
+
+**Fail loudly.** If any action fails, the recorder stops, captures a failure
+screenshot, records the failed action + message + scene + timestamp, and the job
+becomes `RECORDING_FAILED` — it never pretends success.
+
+**Determinism.** Fixed viewport, device scale factor, reduced motion, and a
+fixed post-action settle delay make repeated runs of the same actions produce
+the same visual result.
+
+Job statuses (Phase 5): `DRAFT`, `EXPLORING`, `PLANNING`, `STORYBOARD_READY`,
+`ACTIONS_READY`, `RECORDING`, `RECORDING_COMPLETE`, `RECORDING_FAILED`.
+
+Endpoint:
+
+```
+POST /api/demo/[id]/record
+  Guards: storyboard approved, actions approved, no duplicate active recording.
+  Response: { success, status, videoPath, duration, scenes, errors }
+```
+
+The `RecordingPanel` on `/demo/[id]` shows a "Generate Browser Recording" button
+(enabled once actions are approved), progress messages while recording, and an
+embedded video player plus per-scene results when complete. TTS, captions,
+Remotion, and FFmpeg composition are later phases.
 
 ## Planned architecture
 

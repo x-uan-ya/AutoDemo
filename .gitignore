@@ -29,3 +29,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# generated browser recordings (Phase 5 artifacts)
+/public/recordings/

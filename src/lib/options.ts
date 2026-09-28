@@ -74,6 +74,14 @@ export const STATUS_LABELS: Record<DemoStatus, string> = {
   in_progress: "In Progress",
   completed: "Completed",
   failed: "Failed",
+  DRAFT: "Draft",
+  EXPLORING: "Exploring",
+  PLANNING: "Planning",
+  STORYBOARD_READY: "Storyboard Ready",
+  ACTIONS_READY: "Actions Ready",
+  RECORDING: "Recording",
+  RECORDING_COMPLETE: "Recording Complete",
+  RECORDING_FAILED: "Recording Failed",
 };
 
 // Convenience lookup helpers.

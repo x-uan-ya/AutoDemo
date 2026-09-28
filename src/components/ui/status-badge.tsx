@@ -7,6 +7,14 @@ const STATUS_STYLES: Record<DemoStatus, string> = {
   in_progress: "bg-blue-100 text-blue-700",
   completed: "bg-green-100 text-green-700",
   failed: "bg-red-100 text-red-700",
+  DRAFT: "bg-secondary text-secondary-foreground",
+  EXPLORING: "bg-blue-100 text-blue-700",
+  PLANNING: "bg-blue-100 text-blue-700",
+  STORYBOARD_READY: "bg-accent text-accent-foreground",
+  ACTIONS_READY: "bg-accent text-accent-foreground",
+  RECORDING: "bg-blue-100 text-blue-700",
+  RECORDING_COMPLETE: "bg-green-100 text-green-700",
+  RECORDING_FAILED: "bg-red-100 text-red-700",
 };
 
 export function StatusBadge({

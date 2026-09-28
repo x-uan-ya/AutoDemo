@@ -9,10 +9,11 @@
  * Nothing in this file performs work. It only describes data.
  */
 
-// The Phase 4 browser action plan is defined alongside the executor/types in
-// the browser layer; re-exported here so the aggregate can reference it.
-import type { ActionPlan } from "@/lib/browser/types";
-export type { ActionPlan } from "@/lib/browser/types";
+// The Phase 4 browser action plan and Phase 5 recording result are defined
+// alongside the executor/recorder in the browser layer; re-exported here so the
+// aggregate can reference them.
+import type { ActionPlan, RecordingResult } from "@/lib/browser/types";
+export type { ActionPlan, RecordingResult } from "@/lib/browser/types";
 
 // ---------------------------------------------------------------------------
 // Enumerated option types (kept as string unions so they map cleanly to
@@ -55,14 +56,27 @@ export type PipelineStage =
   | "completed";
 
 /**
- * High level status of a demo job. "ready_for_exploration" is the initial
- * state of a newly created (mock) job in this milestone.
+ * High level status of a demo job.
+ *
+ * The original lowercase values are retained for back-compat with earlier
+ * phases / seed data. Phase 5 adds explicit uppercase phase statuses that track
+ * where a job is in the pipeline, including recording outcomes.
  */
 export type DemoStatus =
+  // Legacy (kept so existing data/UI keep working).
   | "ready_for_exploration"
   | "in_progress"
   | "completed"
-  | "failed";
+  | "failed"
+  // Phase-explicit statuses.
+  | "DRAFT"
+  | "EXPLORING"
+  | "PLANNING"
+  | "STORYBOARD_READY"
+  | "ACTIONS_READY"
+  | "RECORDING"
+  | "RECORDING_COMPLETE"
+  | "RECORDING_FAILED";
 
 export type StageStatus = "pending" | "active" | "completed" | "failed";
 
@@ -239,6 +253,8 @@ export interface DemoJob {
   plan?: DemoPlan;
   /** Phase 4 browser action plan, if it has been generated. */
   actionPlan?: ActionPlan;
+  /** Phase 5 recording result, if a recording has run. */
+  recording?: RecordingResult;
   scenes: DemoScene[];
   assets: VideoAsset[];
   createdAt: string;

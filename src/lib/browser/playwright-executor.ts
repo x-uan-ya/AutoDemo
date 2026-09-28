@@ -1,7 +1,28 @@
-import { chromium, type Browser, type Page, type Route } from "playwright";
+import {
+  chromium,
+  type Browser,
+  type BrowserContext,
+  type Page,
+  type Route,
+} from "playwright";
 import type { BrowserAction, ActionExecutionResult } from "./types";
 import { browserActionSchema } from "./schemas";
 import { checkNavigationTarget, flagDestructiveAction } from "./action-security";
+
+/**
+ * Apply the network-layer security guard to a context: only http/https
+ * requests may leave the page; every other scheme is aborted. Exported so the
+ * recorder applies the same guard to its recording context.
+ */
+export async function applyNetworkGuard(
+  context: BrowserContext
+): Promise<void> {
+  await context.route("**/*", (route: Route) => {
+    const scheme = route.request().url().split(":", 1)[0]?.toLowerCase();
+    if (scheme === "http" || scheme === "https") route.continue();
+    else route.abort();
+  });
+}
 
 /**
  * Phase 4 safe Playwright executor.
@@ -75,40 +96,14 @@ export async function executeActions(
 
     // SECURITY: only http/https requests may leave the page; everything else
     // (e.g. custom schemes) is aborted at the network layer.
-    await context.route("**/*", (route: Route) => {
-      const scheme = route.request().url().split(":", 1)[0]?.toLowerCase();
-      if (scheme === "http" || scheme === "https") route.continue();
-      else route.abort();
-    });
+    await applyNetworkGuard(context);
 
     const page = await context.newPage();
 
     for (const raw of actions) {
-      // Re-validate every action right before executing it. Never trust that
-      // upstream validation happened.
-      const parsed = browserActionSchema.safeParse(raw);
-      if (!parsed.success) {
-        results.push({
-          success: false,
-          action: raw,
-          message: `Rejected by schema: ${parsed.error.issues[0]?.message}`,
-        });
-        continue;
-      }
-      const action = parsed.data;
-
-      // Refuse destructive actions unless explicitly allowed.
-      const flag = flagDestructiveAction(action);
-      if (flag && !options.allowFlaggedActions) {
-        results.push({
-          success: false,
-          action,
-          message: `Skipped: action requires human approval (${flag}).`,
-        });
-        continue;
-      }
-
-      results.push(await runOne(page, action, options, timeout));
+      // Re-validate + security-check + execute via the shared single-action
+      // path. Never trust that upstream validation happened.
+      results.push(await executeSingleAction(page, raw, { ...options, actionTimeoutMs: timeout }));
     }
 
     return { results, ok: results.every((r) => r.success) };
@@ -124,6 +119,44 @@ export async function executeActions(
   } finally {
     if (browser) await browser.close().catch(() => undefined);
   }
+}
+
+/**
+ * Execute a single already-validated action on a page, with the same security
+ * checks used by the batch runner. Exported so the Phase 5 recorder can drive
+ * scene-by-scene execution on its own video-recording context while reusing
+ * this exact logic (validation + destructive-action refusal + nav scoping).
+ *
+ * Re-validates the action and refuses flagged destructive actions unless
+ * `options.allowFlaggedActions` is set.
+ */
+export async function executeSingleAction(
+  page: Page,
+  rawAction: BrowserAction,
+  options: ExecutorOptions
+): Promise<ActionExecutionResult> {
+  const timeout = options.actionTimeoutMs ?? DEFAULT_ACTION_TIMEOUT_MS;
+
+  const parsed = browserActionSchema.safeParse(rawAction);
+  if (!parsed.success) {
+    return {
+      success: false,
+      action: rawAction,
+      message: `Rejected by schema: ${parsed.error.issues[0]?.message}`,
+    };
+  }
+  const action = parsed.data;
+
+  const flag = flagDestructiveAction(action);
+  if (flag && !options.allowFlaggedActions) {
+    return {
+      success: false,
+      action,
+      message: `Skipped: action requires human approval (${flag}).`,
+    };
+  }
+
+  return runOne(page, action, options, timeout);
 }
 
 /** Execute a single action, returning a structured result. */

@@ -215,3 +215,58 @@ export interface ActionExecutionResult {
   message?: string;
   screenshotPath?: string;
 }
+
+// ===========================================================================
+// Phase 5 — Deterministic Browser Recording
+// ===========================================================================
+
+/** Details of an action failure captured during recording (never swallowed). */
+export interface RecordingActionFailure {
+  sceneId: string;
+  /** Human-readable action summary. */
+  action: string;
+  message: string;
+  /** Screenshot captured at the moment of failure, if one could be taken. */
+  screenshotPath?: string;
+  timestamp: string;
+}
+
+/**
+ * The recording outcome for a single scene: timing, scene-boundary
+ * screenshots, and whether every action in the scene succeeded.
+ */
+export interface RecordingSceneResult {
+  sceneId: string;
+  title: string;
+  order: number;
+  /** ISO timestamp when the scene started executing. */
+  startTime: string;
+  /** ISO timestamp when the scene finished. */
+  endTime: string;
+  /** Start and end screenshots (and any failure screenshot) for the scene. */
+  screenshotPaths: string[];
+  success: boolean;
+  /** Error message if the scene failed. */
+  error?: string;
+}
+
+/**
+ * The full result of a recording run. Stored on the DemoJob so the UI can show
+ * the video and per-scene outcomes.
+ */
+export interface RecordingResult {
+  success: boolean;
+  /** Public path to the recorded video (served via the record API), or null. */
+  videoPath: string | null;
+  /** Total recording duration in milliseconds. */
+  duration: number;
+  scenes: RecordingSceneResult[];
+  /** All scene-boundary screenshots collected, in order. */
+  screenshots: string[];
+  /** Any action failures, with full context. Empty on full success. */
+  errors: RecordingActionFailure[];
+  /** When the recording finished (ISO 8601). */
+  recordedAt: string;
+  /** Viewport used, for reference. */
+  viewport: { width: number; height: number };
+}

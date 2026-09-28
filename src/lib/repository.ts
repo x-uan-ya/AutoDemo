@@ -9,7 +9,9 @@ import type {
 import type {
   ActionPlan,
   PlannedBrowserAction,
+  RecordingResult,
 } from "@/lib/browser/types";
+import type { DemoStatus } from "@/types";
 import { MOCK_JOBS } from "@/data/mock-jobs";
 import { createInitialPipeline } from "@/lib/pipeline";
 
@@ -55,6 +57,20 @@ export interface DemoJobRepository {
   ): Promise<DemoJob | null>;
   /** Approve the action plan, unlocking (a later) recording stage. */
   approveActionPlan(jobId: string): Promise<DemoJob | null>;
+
+  // ----- Phase 5: recording -----
+  /**
+   * Atomically claim the recording slot for a job. Returns false if a
+   * recording is already active for that job (duplicate-job guard).
+   */
+  tryStartRecording(jobId: string): Promise<boolean>;
+  /** Store the recording result and set the final status. Releases the slot. */
+  finishRecording(
+    jobId: string,
+    result: RecordingResult
+  ): Promise<DemoJob | null>;
+  /** Set a job's high-level status. */
+  setStatus(jobId: string, status: DemoStatus): Promise<DemoJob | null>;
 }
 
 function generateId(): string {
@@ -77,6 +93,8 @@ function deriveTitle(settings: DemoSettings): string {
  */
 class InMemoryDemoJobRepository implements DemoJobRepository {
   private jobs: DemoJob[];
+  /** Job ids with an in-flight recording — the duplicate-job guard. */
+  private recordingInFlight = new Set<string>();
 
   constructor(seed: DemoJob[]) {
     // Clone so we never mutate the exported seed array.
@@ -294,7 +312,55 @@ class InMemoryDemoJobRepository implements DemoJobRepository {
     const now = new Date().toISOString();
     job.actionPlan.status = "approved";
     job.actionPlan.approvedAt = now;
+    // Actions approved -> job is ready to record.
+    job.status = "ACTIONS_READY";
     job.updatedAt = now;
+    return job;
+  }
+
+  async tryStartRecording(jobId: string): Promise<boolean> {
+    const job = this.jobs.find((j) => j.id === jobId);
+    if (!job) return false;
+    // Duplicate-job guard: refuse if a recording is already in flight.
+    if (this.recordingInFlight.has(jobId)) return false;
+
+    this.recordingInFlight.add(jobId);
+    job.status = "RECORDING";
+    job.pipeline = job.pipeline.map((step) =>
+      step.stage === "recording" ? { ...step, status: "active" } : step
+    );
+    job.updatedAt = new Date().toISOString();
+    return true;
+  }
+
+  async finishRecording(
+    jobId: string,
+    result: RecordingResult
+  ): Promise<DemoJob | null> {
+    const job = this.jobs.find((j) => j.id === jobId);
+    // Always release the slot, even if the job vanished.
+    this.recordingInFlight.delete(jobId);
+    if (!job) return null;
+
+    job.recording = result;
+    job.status = result.success ? "RECORDING_COMPLETE" : "RECORDING_FAILED";
+    job.pipeline = job.pipeline.map((step) =>
+      step.stage === "recording"
+        ? { ...step, status: result.success ? "completed" : "failed" }
+        : step
+    );
+    job.updatedAt = new Date().toISOString();
+    return job;
+  }
+
+  async setStatus(
+    jobId: string,
+    status: DemoStatus
+  ): Promise<DemoJob | null> {
+    const job = this.jobs.find((j) => j.id === jobId);
+    if (!job) return null;
+    job.status = status;
+    job.updatedAt = new Date().toISOString();
     return job;
   }
 }

@@ -6,6 +6,7 @@ import { ProgressPipeline } from "@/components/progress-pipeline";
 import { FeatureDiscoveryPanel } from "@/components/feature-discovery-panel";
 import { StoryboardPanel } from "@/components/storyboard-panel";
 import { BrowserActionsPanel } from "@/components/browser-actions-panel";
+import { RecordingPanel } from "@/components/recording-panel";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { getRepository } from "@/lib/repository";
 import { displayHost, formatDate } from "@/lib/utils";
@@ -63,6 +64,13 @@ export default async function DemoDetailPage({
             jobId={job.id}
             initialActionPlan={job.actionPlan}
             storyboardApproved={job.plan?.status === "approved"}
+          />
+
+          <RecordingPanel
+            jobId={job.id}
+            actionsApproved={job.actionPlan?.status === "approved"}
+            sceneTitles={(job.actionPlan?.scenes ?? []).map((s) => s.title)}
+            initialRecording={job.recording}
           />
         </div>
 
