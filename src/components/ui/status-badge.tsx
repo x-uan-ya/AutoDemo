@@ -15,6 +15,9 @@ const STATUS_STYLES: Record<DemoStatus, string> = {
   RECORDING: "bg-blue-100 text-blue-700",
   RECORDING_COMPLETE: "bg-green-100 text-green-700",
   RECORDING_FAILED: "bg-red-100 text-red-700",
+  VOICE_GENERATING: "bg-blue-100 text-blue-700",
+  VOICE_READY: "bg-green-100 text-green-700",
+  VOICE_FAILED: "bg-red-100 text-red-700",
 };
 
 export function StatusBadge({

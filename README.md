@@ -8,16 +8,18 @@ features, plans a walkthrough storyboard, generates narration, records the site
 with browser automation, and renders a final video.
 
 > **Milestone status: foundation + Website Explorer + AI Feature Discovery +
-> Demo Planner + Browser Action Engine + Browser Recording.** This repository
+> Demo Planner + Browser Action Engine + Browser Recording + Voice Narration.**
+> This repository
 > contains the application shell, pages, reusable components, the data model, a
 > Playwright-based Website Explorer (passive snapshot of a site), an AI Feature
 > Discovery stage (evidence-grounded feature list from a multimodal LLM), a Demo
 > Planner that turns selected features into an editable, duration-aware,
 > purpose-differentiated storyboard with an approval gate, a Browser Action
 > Engine that converts an approved storyboard into safe, allowlisted browser
-> actions, and a deterministic Browser Recorder that executes those actions in
-> Playwright and produces a video. It does not yet perform text-to-speech,
-> captions, or video composition/rendering.
+> actions, a deterministic Browser Recorder that executes those actions in
+> Playwright and produces a video, and per-scene Voice Narration (TTS) for the
+> storyboard. It does not yet merge audio with video, or perform captions or
+> video composition/rendering.
 
 ## Current functionality
 
@@ -300,8 +302,54 @@ POST /api/demo/[id]/record
 
 The `RecordingPanel` on `/demo/[id]` shows a "Generate Browser Recording" button
 (enabled once actions are approved), progress messages while recording, and an
-embedded video player plus per-scene results when complete. TTS, captions,
+embedded video player plus per-scene results when complete. Captions,
 Remotion, and FFmpeg composition are later phases.
+
+## Voice Narration (Phase 6)
+
+Turns each approved storyboard scene's narration into an audio file — one MP3
+per scene. Audio is NOT merged with the recording yet (a later phase).
+
+Files (`src/lib/tts/`):
+
+- `types.ts` — the `TtsProvider` interface (`generateSpeech({ text, language,
+  voice }) -> { audioPath, duration }`), plus `SceneAudio` / `VoiceOver`
+  metadata and `TtsError`.
+- `voices.ts` — maps the app's language keys (English, Mandarin) and voice keys
+  (Professional/Friendly × Female/Male) to provider voice ids. Provider-specific
+  ids never reach the UI. Adding a language means extending these tables.
+- `provider.ts` — `PollyTtsProvider` (Amazon Polly, lazy-loaded SDK) and an
+  offline `MockTtsProvider` that writes a valid silent MP3. `getTtsProvider`
+  picks Polly when AWS is configured (or `AUTODEMO_TTS_PROVIDER=polly`),
+  otherwise the mock — so the app runs with zero cloud setup.
+- `voice-generation.ts` — generates audio per scene with **partial-success**
+  handling: if one scene fails, the others still succeed and the failed one is
+  marked for retry.
+
+Supported languages: **English** and **Mandarin Chinese** (structured so more
+can be added). Voices: Professional Female/Male, Friendly Female/Male.
+
+Per-scene audio is written to `public/voice/<jobId>/scene-001.mp3`, ... (served
+statically, gitignored). Stored metadata per scene: `sceneId`, `order`,
+`language`, `voice`, `text`, `duration`, `audioPath`, `status`.
+
+Job statuses (Phase 6): `VOICE_GENERATING`, `VOICE_READY`, `VOICE_FAILED`.
+
+Endpoints:
+
+```
+POST  /api/demo/[id]/voice   Generate narration audio for every scene
+  Guards: storyboard approved, language supported (English/Mandarin), no
+  duplicate active voice job.
+PATCH /api/demo/[id]/voice   Regenerate one scene's audio ({ sceneId }),
+  preserving all other scenes.
+```
+
+The `VoicePanel` on `/demo/[id]` shows a "Generate Voice" button (enabled once
+the storyboard is approved and the language is supported), per-scene progress,
+and an audio player per scene with a Regenerate/Retry control. Failed scenes are
+shown with their error and a retry; successful scenes are preserved. Merging
+audio with video, captions, and Remotion/FFmpeg are later phases.
 
 ## Planned architecture
 

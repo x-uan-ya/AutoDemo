@@ -11,6 +11,7 @@ import type {
   PlannedBrowserAction,
   RecordingResult,
 } from "@/lib/browser/types";
+import type { VoiceOver, SceneAudio } from "@/lib/tts/types";
 import type { DemoStatus } from "@/types";
 import { MOCK_JOBS } from "@/data/mock-jobs";
 import { createInitialPipeline } from "@/lib/pipeline";
@@ -71,6 +72,20 @@ export interface DemoJobRepository {
   ): Promise<DemoJob | null>;
   /** Set a job's high-level status. */
   setStatus(jobId: string, status: DemoStatus): Promise<DemoJob | null>;
+
+  // ----- Phase 6: voice -----
+  /**
+   * Atomically claim the voice-generation slot for a job. Returns false if a
+   * voice job is already active (duplicate-job guard). Sets VOICE_GENERATING.
+   */
+  tryStartVoice(jobId: string): Promise<boolean>;
+  /** Store the full voice-over result and set the final status. Releases slot. */
+  finishVoiceOver(jobId: string, voiceOver: VoiceOver): Promise<DemoJob | null>;
+  /**
+   * Replace a single scene's audio (regeneration), preserving all other
+   * scenes. Recomputes the overall voice status.
+   */
+  updateSceneAudio(jobId: string, audio: SceneAudio): Promise<DemoJob | null>;
 }
 
 function generateId(): string {
@@ -95,6 +110,8 @@ class InMemoryDemoJobRepository implements DemoJobRepository {
   private jobs: DemoJob[];
   /** Job ids with an in-flight recording — the duplicate-job guard. */
   private recordingInFlight = new Set<string>();
+  /** Job ids with an in-flight voice job — the duplicate-job guard. */
+  private voiceInFlight = new Set<string>();
 
   constructor(seed: DemoJob[]) {
     // Clone so we never mutate the exported seed array.
@@ -360,6 +377,56 @@ class InMemoryDemoJobRepository implements DemoJobRepository {
     const job = this.jobs.find((j) => j.id === jobId);
     if (!job) return null;
     job.status = status;
+    job.updatedAt = new Date().toISOString();
+    return job;
+  }
+
+  async tryStartVoice(jobId: string): Promise<boolean> {
+    const job = this.jobs.find((j) => j.id === jobId);
+    if (!job) return false;
+    if (this.voiceInFlight.has(jobId)) return false;
+
+    this.voiceInFlight.add(jobId);
+    job.status = "VOICE_GENERATING";
+    job.updatedAt = new Date().toISOString();
+    return true;
+  }
+
+  async finishVoiceOver(
+    jobId: string,
+    voiceOver: VoiceOver
+  ): Promise<DemoJob | null> {
+    const job = this.jobs.find((j) => j.id === jobId);
+    this.voiceInFlight.delete(jobId);
+    if (!job) return null;
+
+    job.voiceOver = voiceOver;
+    // Overall job status mirrors the voice-over outcome.
+    job.status =
+      voiceOver.status === "voice_failed" ? "VOICE_FAILED" : "VOICE_READY";
+    job.updatedAt = new Date().toISOString();
+    return job;
+  }
+
+  async updateSceneAudio(
+    jobId: string,
+    audio: SceneAudio
+  ): Promise<DemoJob | null> {
+    const job = this.jobs.find((j) => j.id === jobId);
+    if (!job || !job.voiceOver) return null;
+
+    const idx = job.voiceOver.scenes.findIndex(
+      (s) => s.sceneId === audio.sceneId
+    );
+    if (idx === -1) return null;
+
+    // Preserve all other scenes; replace only this one.
+    job.voiceOver.scenes[idx] = audio;
+
+    // Recompute overall voice status from the preserved set.
+    const allFailed = job.voiceOver.scenes.every((s) => s.status === "failed");
+    job.voiceOver.status = allFailed ? "voice_failed" : "voice_ready";
+    job.status = allFailed ? "VOICE_FAILED" : "VOICE_READY";
     job.updatedAt = new Date().toISOString();
     return job;
   }

@@ -82,6 +82,9 @@ export const STATUS_LABELS: Record<DemoStatus, string> = {
   RECORDING: "Recording",
   RECORDING_COMPLETE: "Recording Complete",
   RECORDING_FAILED: "Recording Failed",
+  VOICE_GENERATING: "Generating Voice",
+  VOICE_READY: "Voice Ready",
+  VOICE_FAILED: "Voice Failed",
 };
 
 // Convenience lookup helpers.

@@ -14,6 +14,9 @@
 // aggregate can reference them.
 import type { ActionPlan, RecordingResult } from "@/lib/browser/types";
 export type { ActionPlan, RecordingResult } from "@/lib/browser/types";
+// Phase 6 voice-over metadata lives with the TTS layer; re-exported here.
+import type { VoiceOver } from "@/lib/tts/types";
+export type { VoiceOver } from "@/lib/tts/types";
 
 // ---------------------------------------------------------------------------
 // Enumerated option types (kept as string unions so they map cleanly to
@@ -76,7 +79,10 @@ export type DemoStatus =
   | "ACTIONS_READY"
   | "RECORDING"
   | "RECORDING_COMPLETE"
-  | "RECORDING_FAILED";
+  | "RECORDING_FAILED"
+  | "VOICE_GENERATING"
+  | "VOICE_READY"
+  | "VOICE_FAILED";
 
 export type StageStatus = "pending" | "active" | "completed" | "failed";
 
@@ -255,6 +261,8 @@ export interface DemoJob {
   actionPlan?: ActionPlan;
   /** Phase 5 recording result, if a recording has run. */
   recording?: RecordingResult;
+  /** Phase 6 voice-over (per-scene narration audio), if it has been generated. */
+  voiceOver?: VoiceOver;
   scenes: DemoScene[];
   assets: VideoAsset[];
   createdAt: string;
