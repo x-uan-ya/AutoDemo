@@ -7,10 +7,12 @@ long-term goal is a system that explores the site, identifies important
 features, plans a walkthrough storyboard, generates narration, records the site
 with browser automation, and renders a final video.
 
-> **Milestone status: foundation + UI.** This repository currently contains the
-> application shell, pages, reusable components, and the data model. It does not
-> yet perform any AI processing, browser automation, text-to-speech, or video
-> rendering. Creating a demo produces a mock project only.
+> **Milestone status: foundation + UI + Website Explorer.** This repository
+> contains the application shell, pages, reusable components, the data model,
+> and the first real backend capability: a Playwright-based Website Explorer
+> that opens a public site and collects a passive snapshot of it. It does not
+> yet perform AI processing, autonomous browser interaction, text-to-speech, or
+> video rendering.
 
 ## Current functionality
 
@@ -20,9 +22,9 @@ with browser automation, and renders a final video.
   website, purpose, duration, language, status, created date, and a view link.
   Shows an empty state when there are no projects.
 - **Create Demo** (`/create`) — a form for website URL, purpose, audience,
-  duration, language, voice, and optional instructions. Input is validated with
-  Zod. Submitting creates a **mock** job and redirects to its detail page. No
-  external API is called.
+  duration, language, voice, and optional instructions. Clicking **Generate
+  Demo** POSTs the URL to `/api/explore`, shows an "Exploring website..." state,
+  then renders the structured data the Website Explorer collected (see below).
 - **Demo detail** (`/demo/[id]`) — project information, a `Ready for
   Exploration` status, and a display-only generation pipeline (Website
   Analysis → Feature Discovery → Demo Planning → Recording → Voice Generation →
@@ -50,9 +52,10 @@ src/
       layout.tsx
       dashboard/page.tsx
       create/page.tsx
-      create/actions.ts   Server Action: validate + create mock job + redirect
       demo/[id]/page.tsx
       demo/[id]/not-found.tsx
+    api/
+      explore/route.ts    POST /api/explore — runs the Website Explorer
   components/
     layout/navbar.tsx
     layout/sidebar.tsx
@@ -62,10 +65,15 @@ src/
     progress-pipeline.tsx
     demo-settings.tsx
     empty-state.tsx
-    create-demo-form.tsx
+    create-demo-form.tsx     Calls /api/explore, shows progress + results
+    exploration-result.tsx   Renders collected website data
   data/
     mock-jobs.ts          Seed data for the dashboard
   lib/
+    browser/
+      types.ts            Explorer result types + ExplorerError
+      url-validator.ts    Server-side SSRF-safe URL validation
+      browser-explorer.ts Playwright passive exploration service
     options.ts            Option lists + human-readable labels
     validation.ts         Zod schema (single source of truth for the form)
     repository.ts         DemoJobRepository interface + in-memory impl
@@ -74,6 +82,37 @@ src/
   types/
     index.ts              Domain types (DemoJob, DemoSettings, etc.)
 ```
+
+## Website Explorer
+
+The first real backend capability. Given a public `https://` URL, AutoDemo
+opens the site in headless Chromium (via Playwright) and collects a **passive**
+snapshot — it reads what the page renders but never clicks, types, or submits.
+
+Collected data (`WebsiteExploration`): final URL, page title, meta description,
+visible headings, buttons, links, forms, navigation, and both viewport and
+full-page screenshots (returned as base64 PNG data URLs).
+
+Endpoint:
+
+```
+POST /api/explore
+Request:  { "url": "https://example.com" }
+Response: { "success": true, "data": { ...WebsiteExploration } }
+      or  { "success": false, "error": { "code", "message" } }
+```
+
+**Security (SSRF protection).** `url-validator.ts` runs server-side and rejects
+anything that is not a public `https://` host: non-https schemes
+(`http`, `file:`, `javascript:`, `data:`), `localhost` / `*.local` /
+`*.internal`, literal loopback/private/link-local/unique-local/CGNAT/multicast
+IPs, and cloud metadata addresses (e.g. `169.254.169.254`). Hostnames are
+resolved via DNS and every resolved address is checked, so a public-looking name
+that points at an internal IP is also rejected. The final URL after redirects is
+re-validated before any data is returned.
+
+No LLM is involved. This milestone proves the path USER → URL → Playwright →
+website data works reliably.
 
 ## Planned architecture
 
@@ -105,6 +144,9 @@ Prerequisites: Node.js 20.9+ (Next.js 16 requirement) and npm.
 # 1. Install dependencies
 npm install
 
+# 1a. Install the Playwright Chromium browser (needed by the Website Explorer)
+npx playwright install chromium
+
 # 2. (Optional) copy environment defaults
 cp .env.example .env.local
 
@@ -126,6 +168,8 @@ npm run typecheck  # tsc --noEmit
 ## Not included yet (intentionally)
 
 - No authentication.
-- No real AI, browser automation, text-to-speech, or video generation.
+- No AI/LLM, text-to-speech, or video generation.
+- No autonomous browser interaction. The explorer is passive (read-only): it
+  does not click, type, or submit.
 - No mobile-optimized layouts (desktop-first for this milestone).
 - No production database (in-memory store only).
