@@ -35,3 +35,6 @@ next-env.d.ts
 
 # generated narration audio (Phase 6 artifacts)
 /public/voice/
+
+# generated final videos (Phase 7 artifacts)
+/public/renders/

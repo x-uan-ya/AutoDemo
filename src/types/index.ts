@@ -17,6 +17,9 @@ export type { ActionPlan, RecordingResult } from "@/lib/browser/types";
 // Phase 6 voice-over metadata lives with the TTS layer; re-exported here.
 import type { VoiceOver } from "@/lib/tts/types";
 export type { VoiceOver } from "@/lib/tts/types";
+// Phase 7 render result lives with the video layer; re-exported here.
+import type { RenderResult } from "@/video/types";
+export type { RenderResult } from "@/video/types";
 
 // ---------------------------------------------------------------------------
 // Enumerated option types (kept as string unions so they map cleanly to
@@ -82,7 +85,10 @@ export type DemoStatus =
   | "RECORDING_FAILED"
   | "VOICE_GENERATING"
   | "VOICE_READY"
-  | "VOICE_FAILED";
+  | "VOICE_FAILED"
+  | "RENDERING"
+  | "RENDER_COMPLETE"
+  | "RENDER_FAILED";
 
 export type StageStatus = "pending" | "active" | "completed" | "failed";
 
@@ -263,6 +269,8 @@ export interface DemoJob {
   recording?: RecordingResult;
   /** Phase 6 voice-over (per-scene narration audio), if it has been generated. */
   voiceOver?: VoiceOver;
+  /** Phase 7 final rendered video result, if it has been rendered. */
+  render?: RenderResult;
   scenes: DemoScene[];
   assets: VideoAsset[];
   createdAt: string;

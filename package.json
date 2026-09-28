@@ -13,6 +13,9 @@
   "dependencies": {
     "@aws-sdk/client-bedrock-runtime": "^3.1141.0",
     "@aws-sdk/client-polly": "^3.1141.0",
+    "@remotion/bundler": "^4.0.529",
+    "@remotion/cli": "^4.0.529",
+    "@remotion/renderer": "^4.0.529",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.1",
     "lucide-react": "^0.454.0",
@@ -20,6 +23,7 @@
     "playwright": "^1.63.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
+    "remotion": "^4.0.529",
     "tailwind-merge": "^2.5.4",
     "zod": "^3.23.8"
   },

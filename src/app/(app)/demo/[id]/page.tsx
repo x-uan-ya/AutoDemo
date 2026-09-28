@@ -8,6 +8,7 @@ import { StoryboardPanel } from "@/components/storyboard-panel";
 import { BrowserActionsPanel } from "@/components/browser-actions-panel";
 import { RecordingPanel } from "@/components/recording-panel";
 import { VoicePanel } from "@/components/voice-panel";
+import { RenderPanel } from "@/components/render-panel";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { getRepository } from "@/lib/repository";
 import { displayHost, formatDate } from "@/lib/utils";
@@ -74,13 +75,27 @@ export default async function DemoDetailPage({
             initialRecording={job.recording}
           />
 
-          <VoicePanel
+          <div id="voice">
+            <VoicePanel
+              jobId={job.id}
+              storyboardApproved={job.plan?.status === "approved"}
+              language={job.settings.language}
+              voice={job.settings.voice}
+              sceneCount={job.plan?.scenes.length ?? 0}
+              initialVoiceOver={job.voiceOver}
+            />
+          </div>
+
+          <RenderPanel
             jobId={job.id}
-            storyboardApproved={job.plan?.status === "approved"}
+            canRender={
+              !!job.recording?.success &&
+              !!job.voiceOver?.scenes.some((s) => s.status === "ready")
+            }
             language={job.settings.language}
             voice={job.settings.voice}
-            sceneCount={job.plan?.scenes.length ?? 0}
-            initialVoiceOver={job.voiceOver}
+            purpose={job.settings.purpose}
+            initialRender={job.render}
           />
         </div>
 

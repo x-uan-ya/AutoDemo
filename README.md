@@ -8,8 +8,8 @@ features, plans a walkthrough storyboard, generates narration, records the site
 with browser automation, and renders a final video.
 
 > **Milestone status: foundation + Website Explorer + AI Feature Discovery +
-> Demo Planner + Browser Action Engine + Browser Recording + Voice Narration.**
-> This repository
+> Demo Planner + Browser Action Engine + Browser Recording + Voice Narration +
+> Video Rendering.** This repository
 > contains the application shell, pages, reusable components, the data model, a
 > Playwright-based Website Explorer (passive snapshot of a site), an AI Feature
 > Discovery stage (evidence-grounded feature list from a multimodal LLM), a Demo
@@ -17,9 +17,10 @@ with browser automation, and renders a final video.
 > purpose-differentiated storyboard with an approval gate, a Browser Action
 > Engine that converts an approved storyboard into safe, allowlisted browser
 > actions, a deterministic Browser Recorder that executes those actions in
-> Playwright and produces a video, and per-scene Voice Narration (TTS) for the
-> storyboard. It does not yet merge audio with video, or perform captions or
-> video composition/rendering.
+> Playwright and produces a video, per-scene Voice Narration (TTS), and a
+> Remotion-based Video Rendering engine that combines the recording, narration,
+> timing, and captions into a polished MP4. Authentication, billing, and mobile
+> are out of scope.
 
 ## Current functionality
 
@@ -349,7 +350,58 @@ The `VoicePanel` on `/demo/[id]` shows a "Generate Voice" button (enabled once
 the storyboard is approved and the language is supported), per-scene progress,
 and an audio player per scene with a Regenerate/Retry control. Failed scenes are
 shown with their error and a retry; successful scenes are preserved. Merging
-audio with video, captions, and Remotion/FFmpeg are later phases.
+audio with video is done by Phase 7 (below).
+
+## Video Rendering (Phase 7)
+
+Combines the browser recording, scene narration, timing, and captions into a
+polished MP4 using [Remotion](https://remotion.dev) (which bundles its own
+FFmpeg). Deterministic: the same job data yields the same video.
+
+The Remotion project lives in `src/video/`:
+
+- `types.ts` — video config (default 1920x1080 / 30fps), timeline scene,
+  caption, and cursor types, plus `RenderResult`.
+- `AutoDemoVideo.tsx` — the root composition: title card → scenes → end card,
+  each wrapped in a subtle fade (`Transition.tsx`).
+- `Scene.tsx` — a scene: the recording still (`Img`) + narration `Audio` + a
+  title chip + timed `Caption` + optional `Cursor`.
+- `Caption.tsx` — bottom-aligned captions, timed per scene.
+- `Cursor.tsx` — animated cursor overlay; renders ONLY when real coordinates
+  are supplied. The current action model is selector-based (no coordinates), so
+  the cursor is off by default — coordinates are never invented.
+- `TitleCard.tsx` / `EndCard.tsx` — opening ("<title> — <purpose>", website,
+  subtitle) and closing ("Thanks for watching") cards.
+- `Root.tsx` / `index.ts` — composition registration; total duration is derived
+  from the props via `calculateMetadata`.
+
+Timeline + render logic (`src/lib/video/`):
+
+- `timeline.ts` — builds the composition props. **Scene duration is driven by
+  the narration audio** (not a fixed value), with a reading-time fallback when
+  audio is absent. Captions are generated from narration (sentence-split,
+  length-weighted). Each scene uses its recording end-screenshot as the visual,
+  which keeps frames correctly dimensioned with no black frames.
+- `render.ts` — bundles the project, selects the composition with the timeline
+  props, and renders `h264` MP4 to `public/renders/<jobId>/demo.mp4`. A webpack
+  override teaches Remotion the `@/` path alias.
+
+Job statuses (Phase 7): `RENDERING`, `RENDER_COMPLETE`, `RENDER_FAILED`.
+
+Endpoint:
+
+```
+POST /api/demo/[id]/render
+  Guards: approved storyboard, a completed browser recording, scene narration,
+  and no duplicate active render.
+  Response: { success, status, videoPath, duration, config, sceneCount }
+```
+
+The `RenderPanel` on `/demo/[id]` shows a "Generate Video" button (enabled once
+a recording and voice exist), render progress, then the final video player with
+duration/language/voice/purpose metadata and **Download**, **Regenerate Voice**,
+and **Regenerate Video** actions. Billing, auth, mobile, captions-as-editing,
+and AI video generation are out of scope.
 
 ## Planned architecture
 

@@ -12,6 +12,7 @@ import type {
   RecordingResult,
 } from "@/lib/browser/types";
 import type { VoiceOver, SceneAudio } from "@/lib/tts/types";
+import type { RenderResult } from "@/video/types";
 import type { DemoStatus } from "@/types";
 import { MOCK_JOBS } from "@/data/mock-jobs";
 import { createInitialPipeline } from "@/lib/pipeline";
@@ -86,6 +87,15 @@ export interface DemoJobRepository {
    * scenes. Recomputes the overall voice status.
    */
   updateSceneAudio(jobId: string, audio: SceneAudio): Promise<DemoJob | null>;
+
+  // ----- Phase 7: render -----
+  /**
+   * Atomically claim the render slot for a job. Returns false if a render is
+   * already active (duplicate-job guard). Sets RENDERING.
+   */
+  tryStartRender(jobId: string): Promise<boolean>;
+  /** Store the render result and set the final status. Releases the slot. */
+  finishRender(jobId: string, render: RenderResult): Promise<DemoJob | null>;
 }
 
 function generateId(): string {
@@ -112,6 +122,8 @@ class InMemoryDemoJobRepository implements DemoJobRepository {
   private recordingInFlight = new Set<string>();
   /** Job ids with an in-flight voice job — the duplicate-job guard. */
   private voiceInFlight = new Set<string>();
+  /** Job ids with an in-flight render job — the duplicate-job guard. */
+  private renderInFlight = new Set<string>();
 
   constructor(seed: DemoJob[]) {
     // Clone so we never mutate the exported seed array.
@@ -427,6 +439,45 @@ class InMemoryDemoJobRepository implements DemoJobRepository {
     const allFailed = job.voiceOver.scenes.every((s) => s.status === "failed");
     job.voiceOver.status = allFailed ? "voice_failed" : "voice_ready";
     job.status = allFailed ? "VOICE_FAILED" : "VOICE_READY";
+    job.updatedAt = new Date().toISOString();
+    return job;
+  }
+
+  async tryStartRender(jobId: string): Promise<boolean> {
+    const job = this.jobs.find((j) => j.id === jobId);
+    if (!job) return false;
+    if (this.renderInFlight.has(jobId)) return false;
+
+    this.renderInFlight.add(jobId);
+    job.status = "RENDERING";
+    job.pipeline = job.pipeline.map((step) =>
+      step.stage === "video_rendering" ? { ...step, status: "active" } : step
+    );
+    job.updatedAt = new Date().toISOString();
+    return true;
+  }
+
+  async finishRender(
+    jobId: string,
+    render: RenderResult
+  ): Promise<DemoJob | null> {
+    const job = this.jobs.find((j) => j.id === jobId);
+    this.renderInFlight.delete(jobId);
+    if (!job) return null;
+
+    job.render = render;
+    const ok = render.status === "render_complete";
+    job.status = ok ? "RENDER_COMPLETE" : "RENDER_FAILED";
+    job.pipeline = job.pipeline.map((step) => {
+      if (step.stage === "video_rendering") {
+        return { ...step, status: ok ? "completed" : "failed" };
+      }
+      if (step.stage === "completed" && ok) {
+        return { ...step, status: "completed" };
+      }
+      return step;
+    });
+    if (ok) job.status = "RENDER_COMPLETE";
     job.updatedAt = new Date().toISOString();
     return job;
   }
