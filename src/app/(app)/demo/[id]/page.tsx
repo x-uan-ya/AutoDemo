@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Info } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { DemoSettings } from "@/components/demo-settings";
 import { ProgressPipeline } from "@/components/progress-pipeline";
+import { FeatureDiscoveryPanel } from "@/components/feature-discovery-panel";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { getRepository } from "@/lib/repository";
 import { displayHost, formatDate } from "@/lib/utils";
@@ -44,14 +45,11 @@ export default async function DemoDetailPage({
         <div className="space-y-6 lg:col-span-2">
           <DemoSettings settings={job.settings} />
 
-          <div className="flex items-start gap-3 rounded-xl border border-border bg-accent/40 p-4 text-sm">
-            <Info className="mt-0.5 h-4 w-4 shrink-0 text-accent-foreground" />
-            <p className="text-muted-foreground">
-              This project is a foundation-milestone placeholder. Exploration,
-              AI planning, narration, recording, and rendering are not yet
-              connected, so the pipeline below is display-only.
-            </p>
-          </div>
+          <FeatureDiscoveryPanel
+            jobId={job.id}
+            initialFeatures={job.features}
+            initialMeta={job.discoveryMeta}
+          />
         </div>
 
         <div className="rounded-xl border border-border bg-card p-6">

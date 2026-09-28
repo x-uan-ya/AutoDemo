@@ -81,17 +81,40 @@ export interface DemoSettings {
 // ---------------------------------------------------------------------------
 
 /**
- * A feature discovered on the target website during the (future) exploration
- * stage.
+ * A feature discovered on the target website by the AI Feature Discovery stage.
+ * Every field is grounded in observable evidence from the page (DOM, visible
+ * text, screenshots); the model is instructed not to invent capabilities.
  */
 export interface DiscoveredFeature {
   id: string;
   name: string;
   description: string;
-  /** URL or in-page route where the feature lives. */
-  location: string;
-  /** Relative importance used when planning the demo. 0..1 */
+  /** How central this feature is to the product. 0..1 */
   importance: number;
+  /** The model's confidence that the feature actually exists. 0..1 */
+  confidence: number;
+  /** Observable evidence supporting the feature (headings, buttons, etc.). */
+  evidence: string[];
+  /** Whether the feature can be shown by passive navigation (no login/pay). */
+  safeToDemo: boolean;
+  /** Whether the user has selected this feature for the demo. */
+  selected: boolean;
+}
+
+/**
+ * Metadata about the AI call that produced a job's features. Stored so cost
+ * and latency are auditable. Null token/cost fields mean the provider did not
+ * report them.
+ */
+export interface FeatureDiscoveryMeta {
+  provider: string;
+  model: string;
+  durationMs: number;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  totalTokens: number | null;
+  estimatedCostUsd: number | null;
+  discoveredAt: string;
 }
 
 /**
@@ -157,6 +180,8 @@ export interface DemoJob {
   /** State of each pipeline stage, in order. */
   pipeline: PipelineStageState[];
   features: DiscoveredFeature[];
+  /** Metadata about the AI call that produced `features`, if it has run. */
+  discoveryMeta?: FeatureDiscoveryMeta;
   scenes: DemoScene[];
   assets: VideoAsset[];
   createdAt: string;

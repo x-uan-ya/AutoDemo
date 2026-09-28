@@ -1,0 +1,123 @@
+[
+  {
+    "site": "example.com",
+    "status": 200,
+    "success": true,
+    "meta": {
+      "provider": "mock",
+      "model": "mock-deterministic-v1",
+      "durationMs": 264,
+      "inputTokens": null,
+      "outputTokens": null,
+      "totalTokens": null,
+      "estimatedCostUsd": 0,
+      "discoveredAt": "2026-09-28T09:07:11.484Z"
+    },
+    "features": [
+      {
+        "name": "Example Domain",
+        "importance": 0.8,
+        "confidence": 0.5,
+        "safeToDemo": true,
+        "selected": true,
+        "evidence": [
+          "Heading: Example Domain"
+        ]
+      }
+    ]
+  },
+  {
+    "site": "iana.org",
+    "status": 200,
+    "success": true,
+    "meta": {
+      "provider": "mock",
+      "model": "mock-deterministic-v1",
+      "durationMs": 368,
+      "inputTokens": null,
+      "outputTokens": null,
+      "totalTokens": null,
+      "estimatedCostUsd": 0,
+      "discoveredAt": "2026-09-28T09:07:13.934Z"
+    },
+    "features": [
+      {
+        "name": "Internet Assigned Numbers Authority",
+        "importance": 0.8,
+        "confidence": 0.5,
+        "safeToDemo": true,
+        "selected": true,
+        "evidence": [
+          "Heading: Internet Assigned Numbers Authority"
+        ]
+      },
+      {
+        "name": "Domain Names",
+        "importance": 0.5,
+        "confidence": 0.5,
+        "safeToDemo": true,
+        "selected": true,
+        "evidence": [
+          "Heading: Domain Names"
+        ]
+      },
+      {
+        "name": "Number Resources",
+        "importance": 0.5,
+        "confidence": 0.5,
+        "safeToDemo": true,
+        "selected": true,
+        "evidence": [
+          "Heading: Number Resources"
+        ]
+      },
+      {
+        "name": "Protocol Assignments",
+        "importance": 0.5,
+        "confidence": 0.5,
+        "safeToDemo": true,
+        "selected": true,
+        "evidence": [
+          "Heading: Protocol Assignments"
+        ]
+      },
+      {
+        "name": "On-page Form",
+        "importance": 0.4,
+        "confidence": 0.6,
+        "safeToDemo": true,
+        "selected": true,
+        "evidence": [
+          "Form: GET with fields search"
+        ]
+      }
+    ]
+  },
+  {
+    "site": "news.ycombinator.com",
+    "status": 200,
+    "success": true,
+    "meta": {
+      "provider": "mock",
+      "model": "mock-deterministic-v1",
+      "durationMs": 253,
+      "inputTokens": null,
+      "outputTokens": null,
+      "totalTokens": null,
+      "estimatedCostUsd": 0,
+      "discoveredAt": "2026-09-28T09:07:16.515Z"
+    },
+    "features": [
+      {
+        "name": "On-page Form",
+        "importance": 0.4,
+        "confidence": 0.6,
+        "safeToDemo": true,
+        "selected": true,
+        "evidence": [
+          "Form: GET with fields q"
+        ]
+      }
+    ]
+  }
+]

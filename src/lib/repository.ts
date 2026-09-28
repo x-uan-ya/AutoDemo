@@ -1,4 +1,9 @@
-import type { DemoJob, DemoSettings } from "@/types";
+import type {
+  DemoJob,
+  DemoSettings,
+  DiscoveredFeature,
+  FeatureDiscoveryMeta,
+} from "@/types";
 import { MOCK_JOBS } from "@/data/mock-jobs";
 import { createInitialPipeline } from "@/lib/pipeline";
 
@@ -14,6 +19,18 @@ export interface DemoJobRepository {
   list(): Promise<DemoJob[]>;
   getById(id: string): Promise<DemoJob | null>;
   create(settings: DemoSettings, title?: string): Promise<DemoJob>;
+  /** Replace a job's discovered features and record the AI call metadata. */
+  setFeatures(
+    id: string,
+    features: DiscoveredFeature[],
+    meta: FeatureDiscoveryMeta
+  ): Promise<DemoJob | null>;
+  /** Toggle the `selected` flag of a single feature. */
+  setFeatureSelection(
+    jobId: string,
+    featureId: string,
+    selected: boolean
+  ): Promise<DemoJob | null>;
 }
 
 function generateId(): string {
@@ -68,6 +85,51 @@ class InMemoryDemoJobRepository implements DemoJobRepository {
       updatedAt: now,
     };
     this.jobs.push(job);
+    return job;
+  }
+
+  async setFeatures(
+    id: string,
+    features: DiscoveredFeature[],
+    meta: FeatureDiscoveryMeta
+  ): Promise<DemoJob | null> {
+    const job = this.jobs.find((j) => j.id === id);
+    if (!job) return null;
+
+    job.features = features;
+    job.discoveryMeta = meta;
+    job.updatedAt = new Date().toISOString();
+
+    // Advance the pipeline: feature discovery is done, planning is next.
+    job.pipeline = job.pipeline.map((step) => {
+      if (step.stage === "website_analysis") {
+        return { ...step, status: "completed" };
+      }
+      if (step.stage === "feature_discovery") {
+        return { ...step, status: "completed" };
+      }
+      return step;
+    });
+    if (job.status === "ready_for_exploration") {
+      job.status = "in_progress";
+    }
+
+    return job;
+  }
+
+  async setFeatureSelection(
+    jobId: string,
+    featureId: string,
+    selected: boolean
+  ): Promise<DemoJob | null> {
+    const job = this.jobs.find((j) => j.id === jobId);
+    if (!job) return null;
+
+    const feature = job.features.find((f) => f.id === featureId);
+    if (!feature) return null;
+
+    feature.selected = selected;
+    job.updatedAt = new Date().toISOString();
     return job;
   }
 }

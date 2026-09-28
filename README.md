@@ -7,12 +7,13 @@ long-term goal is a system that explores the site, identifies important
 features, plans a walkthrough storyboard, generates narration, records the site
 with browser automation, and renders a final video.
 
-> **Milestone status: foundation + UI + Website Explorer.** This repository
-> contains the application shell, pages, reusable components, the data model,
-> and the first real backend capability: a Playwright-based Website Explorer
-> that opens a public site and collects a passive snapshot of it. It does not
-> yet perform AI processing, autonomous browser interaction, text-to-speech, or
-> video rendering.
+> **Milestone status: foundation + Website Explorer + AI Feature Discovery.**
+> This repository contains the application shell, pages, reusable components,
+> the data model, a Playwright-based Website Explorer (passive snapshot of a
+> site), and an AI Feature Discovery stage that turns that snapshot into an
+> evidence-grounded, structured feature list via a multimodal LLM. It does not
+> yet perform autonomous browser interaction, text-to-speech, or video
+> rendering.
 
 ## Current functionality
 
@@ -111,8 +112,55 @@ resolved via DNS and every resolved address is checked, so a public-looking name
 that points at an internal IP is also rejected. The final URL after redirects is
 re-validated before any data is returned.
 
-No LLM is involved. This milestone proves the path USER → URL → Playwright →
+No LLM is involved in exploration. It proves the path USER → URL → Playwright →
 website data works reliably.
+
+## Feature Discovery (AI)
+
+The second backend capability. It takes the `WebsiteExploration` (page data +
+screenshots) and asks a **multimodal** LLM to identify the product's features,
+returning a structured, evidence-grounded list.
+
+Each feature includes: `name`, `description`, `importance` (0–1), `confidence`
+(0–1), `evidence` (observed headings/buttons/links/forms/screenshot elements),
+and `safeToDemo` (whether it can be shown by passive navigation, i.e. no login,
+payment, or destructive submit).
+
+**Evidence rule.** The prompt (`src/lib/ai/prompts.ts`) instructs the model to
+report only features supported by observable evidence and to never invent
+backend functionality. Every feature must cite its evidence. The model's output
+is forced through a tool schema and then re-validated with Zod
+(`src/lib/ai/schemas.ts`) before it enters the app.
+
+**Provider abstraction.** Callers depend only on the `MultimodalAiProvider`
+interface (`src/lib/ai/client.ts`). Two implementations ship:
+
+- `BedrockAiProvider` — Amazon Bedrock Converse API (Claude, multimodal + tool
+  use). Used when an AWS region is configured or `AUTODEMO_AI_PROVIDER=bedrock`.
+- `MockAiProvider` — a deterministic, evidence-only fallback used when no cloud
+  credentials are present, so the app and its flows run with zero setup.
+
+Every call logs usage metadata (provider, model, duration, input/output/total
+tokens, estimated cost) via `console.info`. Token/cost are `null` when the
+provider does not report them (e.g. the mock).
+
+Endpoints:
+
+```
+POST  /api/demo/[id]/discover     Explore the job's site, run discovery, persist
+      Response: { success, data: { features, meta } }
+
+PATCH /api/demo/[id]/features     Toggle a feature's selection
+      Request:  { "featureId": "feat_...", "selected": true }
+```
+
+Discovered features are stored on the `DemoJob` (`features` + `discoveryMeta`)
+and displayed on `/demo/[id]`, where each shows its scores, evidence, and a
+safe-to-demo badge, and can be selected or deselected for the demo.
+
+> Configure the provider in `.env.local` (see `.env.example`): set `AWS_REGION`
+> and optionally `BEDROCK_MODEL_ID` for Bedrock, or `AUTODEMO_AI_PROVIDER=mock`
+> to force the offline mock.
 
 ## Planned architecture
 
@@ -168,8 +216,9 @@ npm run typecheck  # tsc --noEmit
 ## Not included yet (intentionally)
 
 - No authentication.
-- No AI/LLM, text-to-speech, or video generation.
+- No text-to-speech or video generation.
 - No autonomous browser interaction. The explorer is passive (read-only): it
-  does not click, type, or submit.
+  does not click, type, or submit. Feature Discovery only analyzes the captured
+  snapshot.
 - No mobile-optimized layouts (desktop-first for this milestone).
 - No production database (in-memory store only).
