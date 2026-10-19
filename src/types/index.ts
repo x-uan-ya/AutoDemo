@@ -25,7 +25,13 @@ import type { Multilingual } from "@/lib/i18n/types";
 export type { Multilingual } from "@/lib/i18n/types";
 // Phase 9 quality report lives with the browser layer; re-exported here.
 import type { QualityReport, HumanReviewContext } from "@/lib/browser/types";
-export type { QualityReport, HumanReviewContext } from "@/lib/browser/types";
+export type {
+  QualityReport,
+  HumanReviewContext,
+  SceneQualityReport,
+  ActionQualityItem,
+  VerifiedOutcome,
+} from "@/lib/browser/types";
 
 // ---------------------------------------------------------------------------
 // Enumerated option types (kept as string unions so they map cleanly to

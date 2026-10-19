@@ -2,6 +2,7 @@ import type { DemoJob, PlanScene } from "@/types";
 import type {
   ActionPlan,
   BrowserAction,
+  ExpectedState,
   PlannedBrowserAction,
   SceneActionSet,
 } from "./types";
@@ -95,17 +96,45 @@ function selectorForEvidence(ev: ParsedEvidence): string {
  * click links/buttons that came from observed evidence, and we never fill or
  * submit forms automatically.
  */
+/** A synthesized action, optionally carrying a Phase 9 expectedState. */
+interface PlannedStep {
+  action: BrowserAction;
+  expectedState?: ExpectedState;
+}
+
+/** Compact host for human-readable expected-state descriptions. */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+}
+
 function actionsForScene(
   scene: PlanScene,
   isFirst: boolean,
   websiteUrl: string
-): BrowserAction[] {
-  const actions: BrowserAction[] = [];
+): PlannedStep[] {
+  const steps: PlannedStep[] = [];
 
-  // The very first scene navigates to the site.
+  // Pull the scene's heading text (if any) to use as an expected-visible hint.
+  const headingEvidence = scene.evidence
+    .map(parseEvidence)
+    .find((e) => e.kind === "heading");
+
+  // The very first scene navigates to the site. Expect the page to show the
+  // scene's heading text once loaded (Phase 9 verification target).
   if (isFirst) {
-    actions.push({ type: "navigate", url: websiteUrl });
-    actions.push({ type: "wait", milliseconds: 800 });
+    steps.push({
+      action: { type: "navigate", url: websiteUrl },
+      expectedState: {
+        description: `The ${hostOf(websiteUrl)} homepage should be visible`,
+        visibleText: headingEvidence ? [headingEvidence.text] : undefined,
+        screenshotRequired: true,
+      },
+    });
+    steps.push({ action: { type: "wait", milliseconds: 800 } });
   }
 
   const parsed = scene.evidence.map(parseEvidence);
@@ -118,40 +147,51 @@ function actionsForScene(
     if (interactions >= 2) break;
     if (ev.kind === "button" || ev.kind === "link" || ev.kind === "nav") {
       const selector = selectorForEvidence(ev);
-      actions.push({
-        type: "hover",
-        selector,
-        description: `Hover ${ev.kind} "${ev.text}"`,
+      steps.push({
+        action: {
+          type: "hover",
+          selector,
+          description: `Hover ${ev.kind} "${ev.text}"`,
+        },
       });
-      actions.push({
-        type: "click",
-        selector,
-        description: `Click ${ev.kind} "${ev.text}"`,
+      steps.push({
+        action: {
+          type: "click",
+          selector,
+          description: `Click ${ev.kind} "${ev.text}"`,
+        },
+        // After clicking a link/button, expect the page to still be responsive
+        // and show meaningful content. A description-only expectation means the
+        // rule check hands off to vision when configured.
+        expectedState: {
+          description: `After clicking "${ev.text}", the resulting page should load`,
+          screenshotRequired: true,
+        },
       });
-      actions.push({ type: "wait", milliseconds: 600 });
+      steps.push({ action: { type: "wait", milliseconds: 600 } });
       interactions++;
     } else if (ev.kind === "heading" || ev.kind === "form" || ev.kind === "other") {
-      actions.push({ type: "scroll", direction: "down", amount: 400 });
+      steps.push({ action: { type: "scroll", direction: "down", amount: 400 } });
       interactions++;
     }
   }
 
   // If a scene had no usable evidence, at least scroll to show progression.
   if (interactions === 0) {
-    actions.push({ type: "scroll", direction: "down", amount: 500 });
+    steps.push({ action: { type: "scroll", direction: "down", amount: 500 } });
   }
 
   // Capture a screenshot at the end of the scene for the storyboard/recording.
-  actions.push({
-    type: "screenshot",
-    name: `scene-${scene.order}`,
-  });
+  steps.push({ action: { type: "screenshot", name: `scene-${scene.order}` } });
 
-  return actions;
+  return steps;
 }
 
-/** Wrap a raw action with an id, summary, and destructive-intent flag. */
-function toPlanned(action: BrowserAction): PlannedBrowserAction {
+/** Wrap a raw action with an id, summary, destructive flag, and expectedState. */
+function toPlanned(
+  action: BrowserAction,
+  expectedState?: ExpectedState
+): PlannedBrowserAction {
   const reason = flagDestructiveAction(action);
   return {
     id: actionId(),
@@ -159,6 +199,7 @@ function toPlanned(action: BrowserAction): PlannedBrowserAction {
     summary: summarize(action),
     requiresHumanApproval: reason != null,
     approvalReason: reason ?? undefined,
+    expectedState,
   };
 }
 
@@ -207,15 +248,16 @@ export function generateActionPlan(job: DemoJob): ActionPlan {
   const orderedScenes = [...plan.scenes].sort((a, b) => a.order - b.order);
 
   const scenes: SceneActionSet[] = orderedScenes.map((scene, i) => {
-    const raw = actionsForScene(scene, i === 0, websiteUrl);
+    const steps = actionsForScene(scene, i === 0, websiteUrl);
 
     // SECURITY: validate every synthesized action against the strict schema.
-    // If any fails, drop it rather than trust it.
+    // If any fails, drop it rather than trust it. The expectedState is NOT part
+    // of the executable action — it rides alongside for Phase 9 verification.
     const planned: PlannedBrowserAction[] = [];
-    for (const action of raw) {
-      const parsed = browserActionSchema.safeParse(action);
+    for (const step of steps) {
+      const parsed = browserActionSchema.safeParse(step.action);
       if (parsed.success) {
-        planned.push(toPlanned(parsed.data));
+        planned.push(toPlanned(parsed.data, step.expectedState));
       }
     }
 

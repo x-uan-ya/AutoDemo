@@ -86,7 +86,12 @@ export async function capturePageState(
 // Rule-based fast-path check (no AI, no cost)
 // ---------------------------------------------------------------------------
 
-function ruleCheck(
+/**
+ * Rule-based fast-path check (no AI, no cost). Exported for testing: given a
+ * captured PageState and an ExpectedState, decide PASS/FAIL/UNCERTAIN purely
+ * from URL, title, and visible text.
+ */
+export function ruleCheck(
   state: PageState,
   expected: ExpectedState
 ): VerificationResult {
@@ -340,23 +345,18 @@ export async function verifyAction(
     `${opts.screenshotPrefix ?? "verify"}-final`
   ).catch(() => null);
 
-  let outcome: VerifiedOutcome;
-  let humanReview: HumanReviewContext | undefined;
-
-  if (result.status === "PASS") {
-    outcome = retryCount > 0 ? "RETRIED_PASS" : "PASS";
-  } else {
-    // FAIL or UNCERTAIN after retries → human review required.
-    outcome = "HUMAN_REVIEW";
-    humanReview = {
-      sceneId: opts.sceneId,
-      actionSummary: summarize(action),
-      expectedState: expected,
-      actualState: finalState,
-      failReason: result.reason,
-      screenshotPath: finalState?.screenshotPath ?? null,
-    };
-  }
+  const outcome = resolveOutcome(result.status, retryCount);
+  const humanReview =
+    outcome === "HUMAN_REVIEW"
+      ? {
+          sceneId: opts.sceneId,
+          actionSummary: summarize(action),
+          expectedState: expected,
+          actualState: finalState,
+          failReason: result.reason,
+          screenshotPath: finalState?.screenshotPath ?? null,
+        }
+      : undefined;
 
   return {
     outcome,
@@ -367,6 +367,27 @@ export async function verifyAction(
     humanReview,
   };
 }
+
+/**
+ * Pure outcome resolution from a final verification status + retry count.
+ * Exported for testing the retry/human-review state machine without a browser.
+ *
+ *   PASS  + 0 retries  -> PASS
+ *   PASS  + N retries  -> RETRIED_PASS
+ *   FAIL/UNCERTAIN     -> HUMAN_REVIEW (retries already exhausted by caller)
+ */
+export function resolveOutcome(
+  finalStatus: VerificationStatus,
+  retryCount: number
+): VerifiedOutcome {
+  if (finalStatus === "PASS") {
+    return retryCount > 0 ? "RETRIED_PASS" : "PASS";
+  }
+  return "HUMAN_REVIEW";
+}
+
+/** The maximum number of recovery retries the loop performs. Exported for tests. */
+export const MAX_VERIFICATION_RETRIES = MAX_RETRIES;
 
 /**
  * Determine whether a given BrowserAction type warrants a verification check.

@@ -9,7 +9,8 @@ with browser automation, and renders a final video.
 
 > **Milestone status: foundation + Website Explorer + AI Feature Discovery +
 > Demo Planner + Browser Action Engine + Browser Recording + Voice Narration +
-> Video Rendering + Multilingual Generation.** This repository
+> Video Rendering + Multilingual Generation + AI Quality Control.** This
+> repository
 > contains the application shell, pages, reusable components, the data model, a
 > Playwright-based Website Explorer (passive snapshot of a site), an AI Feature
 > Discovery stage (evidence-grounded feature list from a multimodal LLM), a Demo
@@ -452,6 +453,64 @@ The `MultilingualPanel` on `/demo/[id]` shows a language selector (English /
 video players + Download buttons for each generated language. Adding Malay,
 Japanese, or Korean requires one entry in the language registry and a TTS voice
 mapping — nothing else changes.
+
+## AI-Assisted Quality Control (Phase 9)
+
+After each important browser action, the system verifies that the expected UI
+state actually happened — catching failed actions before the final video is
+rendered.
+
+Files:
+
+- `src/lib/browser/types.ts` — adds `ExpectedState` (on `PlannedBrowserAction`,
+  kept OUTSIDE the action allowlist union so the Zod schemas are unchanged),
+  `PageState`, `VerificationResult`, `ActionVerification`, `HumanReviewContext`,
+  and `QualityReport`.
+- `src/lib/browser/verification.ts` — the verification engine:
+  1. **Capture** page state (URL, title, visible text, screenshot).
+  2. **Rule check first** — if URL/title/visible-text clearly match, PASS with
+     no AI call.
+  3. **Vision check** only when the rule check is inconclusive — sends the
+     screenshot to the multimodal provider, which may ONLY return
+     `PASS | FAIL | UNCERTAIN` + reason/evidence.
+  4. **Bounded retry** — up to 2 passive recovery attempts (wait, gentle
+     scroll). Never infinite.
+  5. **Human review** — if still failing, flag `HUMAN_REVIEW` with full context.
+- `src/lib/browser/quality-report.ts` — aggregates per-action outcomes into a
+  `QualityReport` (totals, verification rate, vision-call count) and applies
+  human decisions.
+
+**Security.** The verification model can only return a verdict — it can never
+execute a browser action. The Playwright executor remains the sole component
+allowed to drive the page; the verification engine only reads state and calls
+the vision API. Recovery is limited to passive waits/scrolls.
+
+**Cost control.** The vision model is never called automatically for every
+action — rule-based checks run first, and the model is only invoked when a rule
+check is inconclusive. Scroll/wait/hover/press/screenshot actions are never
+verified (no meaningful state change). Only actions with an `expectedState`
+(navigate/click/fill/select) are checked.
+
+**Recording gate.** Before the final render, every critical action must be
+`PASS` / `RETRIED_PASS` or explicitly `SKIPPED_BY_USER`. Any `HUMAN_REVIEW`
+action sets `blocksRendering: true` until the user decides.
+
+Endpoints:
+
+```
+POST  /api/demo/[id]/quality-check   Build the QualityReport from the recording
+PATCH /api/demo/[id]/quality-check   Resolve a flagged action
+                                     ({ sceneId, actionId, decision })
+```
+
+The `QualityCheckPanel` on `/demo/[id]` shows the pipeline (Recording → Checking
+Actions → Passed → Ready to Render), per-scene verification results, and
+human-review cards with **Retry / Skip / Abort**. Decisions are recorded and the
+render block is recomputed.
+
+Tests (`src/lib/browser/__tests__/verification.test.ts`, run with `npm test`)
+cover: successful click, wrong selector, page did not change, unexpected page,
+retry, human review, and successful verification.
 
 ## Planned architecture
 

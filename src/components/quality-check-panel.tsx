@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import type { QualityReport, ActionQualityItem, HumanReviewContext } from "@/types";
+import type { QualityReport, ActionQualityItem } from "@/types";
 
 interface ApiError { code: string; message: string; }
 
@@ -269,14 +269,15 @@ function ActionItem({
   const isBusy = reviewing === key;
   const review = item.humanReview;
 
-  const outcomeIcon = {
+  const iconMap: Record<string, React.ReactNode> = {
     PASS: <CheckCircle2 className="h-4 w-4 text-green-600" />,
     RETRIED_PASS: <CheckCircle2 className="h-4 w-4 text-green-500" />,
     FAIL: <AlertCircle className="h-4 w-4 text-red-600" />,
     HUMAN_REVIEW: <Eye className="h-4 w-4 text-amber-600" />,
     SKIPPED_BY_USER: <SkipForward className="h-4 w-4 text-muted-foreground" />,
     NO_CHECK: <span className="h-4 w-4 rounded-full border border-border" />,
-  }[item.outcome] ?? null;
+  };
+  const outcomeIcon = iconMap[item.outcome] ?? null;
 
   return (
     <li className={cn("px-4 py-3", item.outcome === "HUMAN_REVIEW" && "bg-amber-50/50")}>
