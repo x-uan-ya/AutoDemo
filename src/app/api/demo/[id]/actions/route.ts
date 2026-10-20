@@ -9,6 +9,8 @@ import {
 import { browserActionSchema } from "@/lib/browser/schemas";
 import { flagDestructiveAction } from "@/lib/browser/action-security";
 import type { PlannedBrowserAction } from "@/lib/browser/types";
+import { shortSecureId } from "@/lib/security/ids";
+import { guardDemoRoute } from "@/lib/security/route-guard";
 
 /**
  * /api/demo/[id]/actions
@@ -36,6 +38,9 @@ export async function POST(
 ) {
   const { id } = await params;
 
+  const guard = await guardDemoRoute(request, id, "actions", "/api/demo/[id]/actions");
+  if (guard.response) return guard.response;
+
   // Body is optional; validate if present.
   try {
     const text = await request.text();
@@ -59,13 +64,7 @@ export async function POST(
   }
 
   const repo = getRepository();
-  const job = await repo.getById(id);
-  if (!job) {
-    return NextResponse.json(
-      { success: false, error: { code: "not_found", message: "Demo not found." } },
-      { status: 404 }
-    );
-  }
+  const job = guard.job!;
 
   try {
     const actionPlan = generateActionPlan(job);
@@ -111,6 +110,9 @@ export async function PUT(
 ) {
   const { id } = await params;
 
+  const guard = await guardDemoRoute(request, id, "actions", "/api/demo/[id]/actions");
+  if (guard.response) return guard.response;
+
   let body: unknown;
   try {
     body = await request.json();
@@ -139,7 +141,7 @@ export async function PUT(
   const planned: PlannedBrowserAction[] = parsed.data.actions.map((action) => {
     const reason = flagDestructiveAction(action);
     return {
-      id: "act_" + Math.random().toString(36).slice(2, 10),
+      id: shortSecureId("act"),
       action,
       summary: summarize(action),
       requiresHumanApproval: reason != null,

@@ -21,6 +21,8 @@ import {
   resolveRecordingSettings,
   type RecordingSettings,
 } from "@/lib/video/recording-settings";
+import { HARDENED_LAUNCH_ARGS } from "./sandbox";
+import { safeSegment } from "@/lib/security/paths";
 
 /**
  * Phase 5 deterministic browser recorder.
@@ -67,7 +69,9 @@ export async function recordDemo(
   const settings = resolveRecordingSettings(options.settings);
   const progress = options.onProgress ?? (() => {});
 
-  const runDir = path.join(ARTIFACT_ROOT, options.jobId);
+  // Path-traversal protection: the job id is validated before it touches the
+  // filesystem, even though it originates from a server-generated id.
+  const runDir = path.join(ARTIFACT_ROOT, safeSegment(options.jobId));
   const screenshotDir = path.join(runDir, "screenshots");
   const videoDir = path.join(runDir, "video");
   await fs.mkdir(screenshotDir, { recursive: true });
@@ -89,7 +93,7 @@ export async function recordDemo(
   try {
     browser = await chromium.launch({
       headless: true,
-      args: ["--no-sandbox", "--disable-dev-shm-usage"],
+      args: HARDENED_LAUNCH_ARGS,
     });
 
     const context = await browser.newContext({
@@ -99,6 +103,7 @@ export async function recordDemo(
       },
       deviceScaleFactor: settings.deviceScaleFactor,
       javaScriptEnabled: true,
+      serviceWorkers: "block",
       // Reduce motion for more deterministic frames.
       reducedMotion: "reduce",
       userAgent:

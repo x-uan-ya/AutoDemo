@@ -3,6 +3,8 @@ import { getRepository } from "@/lib/repository";
 import { generateLanguageVersion } from "@/lib/i18n/multilingual-generation";
 import { isSupportedLanguageCode } from "@/lib/i18n/demo-language";
 import type { TtsVoice } from "@/lib/tts/types";
+import { guardDemoRoute } from "@/lib/security/route-guard";
+import { acquireJobSlot } from "@/lib/security/limits";
 
 /**
  * POST /api/demo/[id]/language/[code]
@@ -24,7 +26,7 @@ export const runtime = "nodejs";
 export const maxDuration = 300;
 
 export async function POST(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string; code: string }> }
 ) {
   const { id, code } = await params;
@@ -43,13 +45,11 @@ export async function POST(
   }
 
   const repo = getRepository();
-  const job = await repo.getById(id);
-  if (!job) {
-    return NextResponse.json(
-      { success: false, error: { code: "not_found", message: "Demo not found." } },
-      { status: 404 }
-    );
-  }
+
+  // Rate limit + authorization boundary.
+  const guard = await guardDemoRoute(request, id, "language", "/api/demo/[id]/language");
+  if (guard.response) return guard.response;
+  const job = guard.job!;
 
   // Guard: approved storyboard.
   if (!job.plan || job.plan.status !== "approved" || job.plan.scenes.length === 0) {
@@ -91,6 +91,19 @@ export async function POST(
     );
   }
 
+  // Global concurrency gate (translate + voice + render is heavy).
+  const releaseSlot = acquireJobSlot();
+  if (!releaseSlot) {
+    await repo.upsertLanguageVersion(id, failedLanguageVersion(code, job));
+    return NextResponse.json(
+      {
+        success: false,
+        error: { code: "server_busy", message: "The server is busy. Please try again shortly." },
+      },
+      { status: 503 }
+    );
+  }
+
   try {
     const voice = job.settings.voice as TtsVoice;
     const version = await generateLanguageVersion(job, code, voice);
@@ -105,22 +118,36 @@ export async function POST(
       error: version.error,
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    // Release the slot and record a failed version.
-    await repo.upsertLanguageVersion(id, {
-      language: code,
-      scenes: [],
-      videoPath: null,
-      videoDuration: 0,
-      status: "failed",
-      reusedRecording: !!job.recording?.success,
-      error: message,
-      provider: "-",
-      generatedAt: new Date().toISOString(),
-    });
+    // Record a failed version (generic) and log detail server-side only.
+    console.error("[error:/api/demo/[id]/language]", err instanceof Error ? err.stack : err);
+    await repo.upsertLanguageVersion(id, failedLanguageVersion(code, job));
     return NextResponse.json(
-      { success: false, status: "failed", error: { code: "generation_failed", message } },
+      {
+        success: false,
+        status: "failed",
+        error: { code: "generation_failed", message: "Language generation failed. Please try again." },
+      },
       { status: 500 }
     );
+  } finally {
+    releaseSlot();
   }
+}
+
+/** A failed LanguageVersion with no internal detail leaked. */
+function failedLanguageVersion(
+  code: "en" | "zh-CN",
+  job: { recording?: { success: boolean } }
+) {
+  return {
+    language: code,
+    scenes: [],
+    videoPath: null,
+    videoDuration: 0,
+    status: "failed" as const,
+    reusedRecording: !!job.recording?.success,
+    error: "Language generation failed.",
+    provider: "-",
+    generatedAt: new Date().toISOString(),
+  };
 }

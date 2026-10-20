@@ -8,6 +8,7 @@ import type {
 } from "./types";
 import { browserActionSchema } from "./schemas";
 import { flagDestructiveAction } from "./action-security";
+import { shortSecureId } from "@/lib/security/ids";
 
 /**
  * Phase 4 Action Planner.
@@ -34,7 +35,7 @@ import { flagDestructiveAction } from "./action-security";
  */
 
 function actionId(): string {
-  return "act_" + Math.random().toString(36).slice(2, 10);
+  return shortSecureId("act");
 }
 
 /**

@@ -19,6 +19,7 @@ import type { QualityReport } from "@/lib/browser/types";
 import type { DemoStatus } from "@/types";
 import { MOCK_JOBS } from "@/data/mock-jobs";
 import { createInitialPipeline } from "@/lib/pipeline";
+import { secureId } from "@/lib/security/ids";
 
 /**
  * Persistence boundary for demo jobs.
@@ -138,8 +139,8 @@ export interface DemoJobRepository {
 }
 
 function generateId(): string {
-  // Short, URL-safe id. A real store would use a DB default (uuid/cuid).
-  return "demo_" + Math.random().toString(36).slice(2, 10);
+  // Cryptographically secure id; demo ids double as access identifiers.
+  return secureId("demo");
 }
 
 function deriveTitle(settings: DemoSettings): string {

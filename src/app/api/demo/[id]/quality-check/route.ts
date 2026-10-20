@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getRepository } from "@/lib/repository";
 import { buildQualityReport } from "@/lib/browser/quality-report";
+import { guardDemoRoute } from "@/lib/security/route-guard";
 
 /**
  * /api/demo/[id]/quality-check
@@ -16,19 +17,15 @@ import { buildQualityReport } from "@/lib/browser/quality-report";
 export const runtime = "nodejs";
 
 export async function POST(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
   const repo = getRepository();
-  const job = await repo.getById(id);
 
-  if (!job) {
-    return NextResponse.json(
-      { success: false, error: { code: "not_found", message: "Demo not found." } },
-      { status: 404 }
-    );
-  }
+  const guard = await guardDemoRoute(request, id, "actions", "/api/demo/[id]/quality-check");
+  if (guard.response) return guard.response;
+  const job = guard.job!;
 
   if (!job.recording) {
     return NextResponse.json(
@@ -92,6 +89,9 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+
+  const guard = await guardDemoRoute(request, id, "default", "/api/demo/[id]/quality-check");
+  if (guard.response) return guard.response;
 
   let body: unknown;
   try {

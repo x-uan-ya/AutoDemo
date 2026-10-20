@@ -8,19 +8,38 @@ import {
 import type { BrowserAction, ActionExecutionResult } from "./types";
 import { browserActionSchema } from "./schemas";
 import { checkNavigationTarget, flagDestructiveAction } from "./action-security";
+import { HARDENED_LAUNCH_ARGS } from "./sandbox";
+import { isHostAllowedSync } from "@/lib/security/url-validator";
+import { logSecurityEvent } from "@/lib/security/log";
 
 /**
  * Apply the network-layer security guard to a context: only http/https
- * requests may leave the page; every other scheme is aborted. Exported so the
- * recorder applies the same guard to its recording context.
+ * requests may leave the page; every other scheme is aborted. Main-frame
+ * navigations to internal/private hosts are also aborted (covers redirects).
+ * Exported so the recorder applies the same guard to its recording context.
  */
 export async function applyNetworkGuard(
   context: BrowserContext
 ): Promise<void> {
   await context.route("**/*", (route: Route) => {
-    const scheme = route.request().url().split(":", 1)[0]?.toLowerCase();
-    if (scheme === "http" || scheme === "https") route.continue();
-    else route.abort();
+    const url = route.request().url();
+    const scheme = url.split(":", 1)[0]?.toLowerCase();
+    if (scheme !== "http" && scheme !== "https") {
+      route.abort();
+      return;
+    }
+    if (route.request().isNavigationRequest()) {
+      const check = isHostAllowedSync(url);
+      if (!check.allowed) {
+        logSecurityEvent("navigation_blocked", {
+          component: "executor",
+          reason: check.reason,
+        });
+        route.abort();
+        return;
+      }
+    }
+    route.continue();
   });
 }
 
@@ -83,11 +102,12 @@ export async function executeActions(
   try {
     browser = await chromium.launch({
       headless: true,
-      args: ["--no-sandbox", "--disable-dev-shm-usage"],
+      args: HARDENED_LAUNCH_ARGS,
     });
     const context = await browser.newContext({
       viewport: VIEWPORT,
       javaScriptEnabled: true,
+      serviceWorkers: "block",
       userAgent:
         "Mozilla/5.0 (compatible; AutoDemoActionEngine/1.0; +https://autodemo.example/bot)",
     });

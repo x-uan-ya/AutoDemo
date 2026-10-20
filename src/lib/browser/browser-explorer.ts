@@ -5,6 +5,9 @@ import {
   type Route,
 } from "playwright";
 import { validateExploreUrl } from "./url-validator";
+import { isHostAllowedSync } from "@/lib/security/url-validator";
+import { logSecurityEvent } from "@/lib/security/log";
+import { HARDENED_LAUNCH_ARGS } from "./sandbox";
 import {
   ExplorerError,
   type ExploredButton,
@@ -55,30 +58,61 @@ export async function exploreWebsite(
   try {
     browser = await chromium.launch({
       headless: true,
-      args: ["--no-sandbox", "--disable-dev-shm-usage"],
+      args: HARDENED_LAUNCH_ARGS,
     });
 
     const context = await browser.newContext({
       viewport: VIEWPORT,
       javaScriptEnabled: true,
+      // Do not persist storage; isolate each exploration.
+      serviceWorkers: "block",
       userAgent:
         "Mozilla/5.0 (compatible; AutoDemoExplorer/1.0; +https://autodemo.example/bot)",
     });
     context.setDefaultNavigationTimeout(navTimeout);
     context.setDefaultTimeout(navTimeout);
 
-    // Network guard: allow only http/https requests. Images are allowed
-    // (enabled by default); dangerous schemes are aborted.
+    // Network guard: allow only http/https requests. Dangerous schemes are
+    // aborted, and any request whose host is internal/private is aborted
+    // (per-request SSRF guard, which also covers redirects to internal hosts).
     await context.route("**/*", (route: Route) => {
-      const scheme = route.request().url().split(":", 1)[0]?.toLowerCase();
-      if (scheme === "http" || scheme === "https") {
-        route.continue();
-      } else {
+      const url = route.request().url();
+      const scheme = url.split(":", 1)[0]?.toLowerCase();
+      if (scheme !== "http" && scheme !== "https") {
         route.abort();
+        return;
       }
+      // Guard main-frame navigations against internal hosts synchronously.
+      if (route.request().isNavigationRequest()) {
+        const check = isHostAllowedSync(url);
+        if (!check.allowed) {
+          logSecurityEvent("navigation_blocked", {
+            component: "explorer",
+            reason: check.reason,
+          });
+          route.abort();
+          return;
+        }
+      }
+      route.continue();
     });
 
     const page = await context.newPage();
+
+    // Belt-and-braces: validate each main-frame navigation target as well.
+    page.on("framenavigated", (frame) => {
+      if (frame !== page.mainFrame()) return;
+      const navUrl = frame.url();
+      if (navUrl === "about:blank") return;
+      const check = isHostAllowedSync(navUrl);
+      if (!check.allowed) {
+        logSecurityEvent("navigation_blocked", {
+          component: "explorer",
+          phase: "framenavigated",
+          reason: check.reason,
+        });
+      }
+    });
 
     const result = await withTimeout(
       collectFromPage(page, validated.url),

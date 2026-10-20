@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { DemoJob } from "@/types";
+import { safeSegment } from "@/lib/security/paths";
 import type { AutoDemoVideoProps, RenderResult } from "@/video/types";
 import { AUTODEMO_COMPOSITION_ID } from "@/video/types";
 import { buildTimeline, totalDurationInFrames } from "./timeline";
@@ -64,9 +65,11 @@ export async function renderDemoVideo(
     throw new RenderError("config", "There are no scenes to render.");
   }
 
-  const outDir = path.join(RENDER_ROOT, job.id);
+  const outDir = path.join(RENDER_ROOT, safeSegment(job.id));
   await fs.mkdir(outDir, { recursive: true });
-  const outFile = path.join(outDir, options.outputFileName ?? "demo.mp4");
+  // The output filename may carry a language code; validate the base segment.
+  const outName = safeSegment(options.outputFileName ?? "demo.mp4");
+  const outFile = path.join(outDir, outName);
 
   // Lazy-load the heavy Remotion Node APIs.
   const { bundle } = await import("@remotion/bundler");

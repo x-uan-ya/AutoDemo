@@ -7,6 +7,7 @@ import {
 } from "@/lib/tts/voice-generation";
 import { TtsError, type TtsVoice } from "@/lib/tts/types";
 import { toTtsLanguage } from "@/lib/tts/voices";
+import { guardDemoRoute } from "@/lib/security/route-guard";
 
 /**
  * /api/demo/[id]/voice
@@ -65,13 +66,10 @@ export async function POST(
 ) {
   const { id } = await params;
   const repo = getRepository();
-  const job = await repo.getById(id);
-  if (!job) {
-    return NextResponse.json(
-      { success: false, error: { code: "not_found", message: "Demo not found." } },
-      { status: 404 }
-    );
-  }
+
+  const guard = await guardDemoRoute(request, id, "voice", "/api/demo/[id]/voice");
+  if (guard.response) return guard.response;
+  const job = guard.job!;
 
   const ready = validateReady(job);
   if (ready) {
@@ -162,13 +160,10 @@ export async function PATCH(
 ) {
   const { id } = await params;
   const repo = getRepository();
-  const job = await repo.getById(id);
-  if (!job) {
-    return NextResponse.json(
-      { success: false, error: { code: "not_found", message: "Demo not found." } },
-      { status: 404 }
-    );
-  }
+
+  const guard = await guardDemoRoute(request, id, "voice", "/api/demo/[id]/voice");
+  if (guard.response) return guard.response;
+  const job = guard.job!;
 
   const ready = validateReady(job);
   if (ready) {

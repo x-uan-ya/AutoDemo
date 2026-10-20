@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { getRepository } from "@/lib/repository";
 import { recordDemo } from "@/lib/browser/recorder";
+import { guardDemoRoute } from "@/lib/security/route-guard";
+import { acquireJobSlot } from "@/lib/security/limits";
+import { safeErrorResponse } from "@/lib/security/errors";
 
 /**
  * POST /api/demo/[id]/record
@@ -21,19 +24,16 @@ export const runtime = "nodejs";
 export const maxDuration = 300;
 
 export async function POST(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
   const repo = getRepository();
-  const job = await repo.getById(id);
 
-  if (!job) {
-    return NextResponse.json(
-      { success: false, error: { code: "not_found", message: "Demo not found." } },
-      { status: 404 }
-    );
-  }
+  // Rate limit + authorization boundary.
+  const guard = await guardDemoRoute(request, id, "record", "/api/demo/[id]/record");
+  if (guard.response) return guard.response;
+  const job = guard.job!;
 
   // Guard: storyboard approved.
   if (!job.plan || job.plan.status !== "approved") {
@@ -82,6 +82,19 @@ export async function POST(
     );
   }
 
+  // Global concurrency gate: cap simultaneous heavy browser jobs server-wide.
+  const releaseSlot = acquireJobSlot();
+  if (!releaseSlot) {
+    await repo.finishRecording(id, failedRecording("Server is busy. Try again shortly."));
+    return NextResponse.json(
+      {
+        success: false,
+        error: { code: "server_busy", message: "The server is busy. Please try again shortly." },
+      },
+      { status: 503 }
+    );
+  }
+
   try {
     const result = await recordDemo({
       jobId: id,
@@ -100,33 +113,37 @@ export async function POST(
       errors: result.errors,
     });
   } catch (err) {
-    // Any unexpected error still releases the recording slot and marks failure.
-    const message = err instanceof Error ? err.message : String(err);
-    await repo.finishRecording(id, {
-      success: false,
-      videoPath: null,
-      duration: 0,
-      scenes: [],
-      screenshots: [],
-      errors: [
-        {
-          sceneId: "-",
-          action: "record",
-          message: `Recording failed: ${message}`,
-          timestamp: new Date().toISOString(),
-        },
-      ],
-      recordedAt: new Date().toISOString(),
-      viewport: { width: 0, height: 0 },
+    // Store a failed result (server-side detail) but return a generic message.
+    await repo.finishRecording(id, failedRecording("Recording failed."));
+    return safeErrorResponse(err, {
+      route: "/api/demo/[id]/record",
+      status: 500,
+      code: "recording_failed",
+      clientMessage: "Recording failed. Please try again.",
     });
-
-    return NextResponse.json(
-      {
-        success: false,
-        status: "RECORDING_FAILED",
-        error: { code: "recording_failed", message },
-      },
-      { status: 500 }
-    );
+  } finally {
+    // Always release the concurrency slot (browser cleanup is in the recorder).
+    releaseSlot();
   }
+}
+
+/** Build a minimal failed RecordingResult (no internal detail leaked). */
+function failedRecording(reason: string) {
+  return {
+    success: false,
+    videoPath: null,
+    duration: 0,
+    scenes: [],
+    screenshots: [],
+    errors: [
+      {
+        sceneId: "-",
+        action: "record",
+        message: reason,
+        timestamp: new Date().toISOString(),
+      },
+    ],
+    recordedAt: new Date().toISOString(),
+    viewport: { width: 0, height: 0 },
+  };
 }

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getRepository } from "@/lib/repository";
 import { generatePlan, AiError } from "@/lib/planner/demo-planner";
 import type { PlanScene } from "@/types";
+import { guardDemoRoute } from "@/lib/security/route-guard";
 
 /**
  * /api/demo/[id]/plan
@@ -17,18 +18,15 @@ export const runtime = "nodejs";
 export const maxDuration = 120;
 
 export async function POST(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
   const repo = getRepository();
-  const job = await repo.getById(id);
-  if (!job) {
-    return NextResponse.json(
-      { success: false, error: { code: "not_found", message: "Demo not found." } },
-      { status: 404 }
-    );
-  }
+
+  const guard = await guardDemoRoute(request, id, "actions", "/api/demo/[id]/plan");
+  if (guard.response) return guard.response;
+  const job = guard.job!;
 
   try {
     const plan = await generatePlan(job);
@@ -64,8 +62,11 @@ export async function PUT(
 ) {
   const { id } = await params;
   const repo = getRepository();
-  const job = await repo.getById(id);
-  if (!job || !job.plan) {
+
+  const guard = await guardDemoRoute(request, id, "actions", "/api/demo/[id]/plan");
+  if (guard.response) return guard.response;
+  const job = guard.job!;
+  if (!job.plan) {
     return NextResponse.json(
       { success: false, error: { code: "not_found", message: "No storyboard to update." } },
       { status: 404 }

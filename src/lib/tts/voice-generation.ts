@@ -1,5 +1,6 @@
 import path from "node:path";
 import type { DemoJob, PlanScene } from "@/types";
+import { safeSegment } from "@/lib/security/paths";
 import { getTtsProvider } from "./provider";
 import { toTtsLanguage } from "./voices";
 import {
@@ -53,7 +54,11 @@ async function generateSceneAudio(
   voice: TtsVoice
 ): Promise<SceneAudio> {
   const provider = getTtsProvider();
-  const outputPath = path.join(VOICE_ROOT, jobId, sceneFileName(scene.order));
+  const outputPath = path.join(
+    VOICE_ROOT,
+    safeSegment(jobId),
+    sceneFileName(scene.order)
+  );
 
   const base: Omit<SceneAudio, "status" | "audioPath" | "duration"> = {
     sceneId: scene.id,

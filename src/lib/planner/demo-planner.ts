@@ -1,5 +1,6 @@
 import type { DemoJob, DemoPlan, PlanScene } from "@/types";
 import { getAiProvider, AiError } from "@/lib/ai/client";
+import { shortSecureId } from "@/lib/security/ids";
 import { labelFor, DURATION_OPTIONS, PURPOSE_OPTIONS, LANGUAGE_OPTIONS } from "@/lib/options";
 import {
   buildDurationPlan,
@@ -24,7 +25,7 @@ import type { PlannerContext } from "./prompts";
  */
 
 function sceneId(): string {
-  return "scene_" + Math.random().toString(36).slice(2, 10);
+  return shortSecureId("scene");
 }
 
 function buildContext(job: DemoJob): PlannerContext {

@@ -11,6 +11,7 @@ import {
   type DemoLanguageCode,
 } from "./demo-language";
 import { translateNarration } from "@/lib/ai/translation";
+import { safeSegment } from "@/lib/security/paths";
 import { getTtsProvider } from "@/lib/tts/provider";
 import type { TtsVoice } from "@/lib/tts/types";
 import { buildCaptions } from "@/lib/video/timeline";
@@ -103,8 +104,8 @@ export async function generateLanguageVersion(
     const narration = translations[i] ?? scene.narration;
     const outputPath = path.join(
       VOICE_ROOT,
-      job.id,
-      language,
+      safeSegment(job.id),
+      safeSegment(language),
       sceneFileName(scene.order)
     );
 

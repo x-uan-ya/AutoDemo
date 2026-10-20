@@ -4,6 +4,10 @@ import { ExplorerError } from "@/lib/browser/types";
 import { discoverFeaturesFromExploration, AiError } from "@/lib/ai/feature-discovery";
 import { getRepository } from "@/lib/repository";
 import { labelFor, PURPOSE_OPTIONS } from "@/lib/options";
+import { guardDemoRoute } from "@/lib/security/route-guard";
+import { acquireJobSlot } from "@/lib/security/limits";
+import { safeErrorResponse } from "@/lib/security/errors";
+import { logSecurityEvent } from "@/lib/security/log";
 
 /**
  * POST /api/demo/[id]/discover
@@ -22,17 +26,25 @@ export const runtime = "nodejs";
 export const maxDuration = 120;
 
 export async function POST(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-
   const repo = getRepository();
-  const job = await repo.getById(id);
-  if (!job) {
+
+  // Rate limit (explore bucket — this runs the browser) + authorization.
+  const guard = await guardDemoRoute(request, id, "explore", "/api/demo/[id]/discover");
+  if (guard.response) return guard.response;
+  const job = guard.job!;
+
+  const releaseSlot = acquireJobSlot();
+  if (!releaseSlot) {
     return NextResponse.json(
-      { success: false, error: { code: "not_found", message: "Demo not found." } },
-      { status: 404 }
+      {
+        success: false,
+        error: { code: "server_busy", message: "The server is busy. Please try again shortly." },
+      },
+      { status: 503 }
     );
   }
 
@@ -58,6 +70,9 @@ export async function POST(
     });
   } catch (err) {
     if (err instanceof ExplorerError) {
+      if (err.code === "blocked_url") {
+        logSecurityEvent("ssrf_blocked", { route: "/api/demo/[id]/discover", reason: err.message });
+      }
       const status =
         err.code === "timeout"
           ? 504
@@ -76,16 +91,13 @@ export async function POST(
         { status }
       );
     }
-    console.error("Unexpected /discover error:", err);
-    return NextResponse.json(
-      {
-        success: false,
-        error: {
-          code: "internal_error",
-          message: "An unexpected error occurred during feature discovery.",
-        },
-      },
-      { status: 500 }
-    );
+    return safeErrorResponse(err, {
+      route: "/api/demo/[id]/discover",
+      status: 500,
+      code: "internal_error",
+      clientMessage: "An unexpected error occurred during feature discovery.",
+    });
+  } finally {
+    releaseSlot();
   }
 }

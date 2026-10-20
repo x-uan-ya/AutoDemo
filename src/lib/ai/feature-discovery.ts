@@ -1,5 +1,6 @@
 import type { WebsiteExploration } from "@/lib/browser/types";
 import type { DiscoveredFeature, FeatureDiscoveryMeta } from "@/types";
+import { shortSecureId } from "@/lib/security/ids";
 import { getAiProvider, AiError, type DiscoverFeaturesInput } from "./client";
 
 /**
@@ -17,7 +18,7 @@ export interface FeatureDiscoveryOutput {
 }
 
 function featureId(): string {
-  return "feat_" + Math.random().toString(36).slice(2, 10);
+  return shortSecureId("feat");
 }
 
 export async function discoverFeatures(
