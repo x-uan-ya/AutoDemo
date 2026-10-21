@@ -10,10 +10,12 @@
  *
  * Note on `--no-sandbox`: Chromium's OS sandbox requires privileges unavailable
  * in many container/CI environments. We keep `--no-sandbox` for compatibility
- * but compensate with network egress guards (SSRF validation on every request),
- * no persistent storage, blocked service workers, and running the browser as an
- * untrusted, short-lived process. In production, run the browser in an
- * egress-restricted network segment for defense in depth.
+ * and add application-level defense in depth (per-request SSRF validation, no
+ * persistent storage, blocked service workers, short-lived untrusted process).
+ * These reduce but do NOT eliminate network-pivot risk (e.g. DNS rebinding).
+ * Production MUST run the browser worker in a network-isolated environment with
+ * enforced egress controls — see SECURITY.md ("Browser Network Isolation") and
+ * DEPLOYMENT.md. The network layer, not this file, is the real boundary.
  */
 export const HARDENED_LAUNCH_ARGS: string[] = [
   "--no-sandbox",

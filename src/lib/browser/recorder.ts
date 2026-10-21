@@ -22,6 +22,7 @@ import {
   type RecordingSettings,
 } from "@/lib/video/recording-settings";
 import { HARDENED_LAUNCH_ARGS } from "./sandbox";
+import { browserProxyLaunchOptions } from "./network-config";
 import { safeSegment } from "@/lib/security/paths";
 
 /**
@@ -94,6 +95,8 @@ export async function recordDemo(
     browser = await chromium.launch({
       headless: true,
       args: HARDENED_LAUNCH_ARGS,
+      // Optional egress proxy; the network layer still owns enforcement.
+      ...browserProxyLaunchOptions(),
     });
 
     const context = await browser.newContext({

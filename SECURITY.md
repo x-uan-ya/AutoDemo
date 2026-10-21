@@ -55,8 +55,93 @@ A hostname can resolve to a public IP at validation time and a private IP at
 navigation time. We validate up front, re-validate the final URL, and guard
 each navigation, but Playwright uses the OS resolver so the socket is not pinned
 to the validated IP. **Deploy the browser in a network that has no route to
-internal/private ranges** (egress-restricted subnet / separate VPC). This is a
-documented residual risk.
+internal/private ranges** (egress-restricted subnet / separate VPC). See
+"Browser Network Isolation" below — this residual risk is NOT closed by
+application code and remains open until network-level egress isolation is
+deployed and verified.
+
+## Browser Network Isolation
+
+The browser worker (the component that launches Chromium via Playwright to
+explore, act on, and record untrusted websites) must run inside an isolated
+network environment with enforced egress controls. This is a **deployment
+infrastructure requirement**, not something the application code can satisfy on
+its own.
+
+### Why application-level URL validation cannot fully eliminate DNS rebinding
+
+AutoDemo validates every user-supplied URL (scheme, hostname, and DNS-resolved
+addresses) before launching the browser, re-validates the final URL after load,
+and aborts per-request navigations to internal hosts. These are real and
+valuable, but they are **defense in depth, not the final security boundary**:
+
+- Chromium performs its own DNS resolution at navigation time. The address we
+  validated and the address the browser actually connects to can differ (classic
+  time-of-check/time-of-use). An attacker controlling a DNS response can return a
+  public IP during validation and a private IP (for example `169.254.169.254` or
+  `10.x.x.x`) microseconds later when the browser connects.
+- Short-TTL DNS, multi-record round-robin, and redirect timing can all produce a
+  resolved address the application never saw.
+- We cannot pin the browser's socket to the validated IP with Playwright's
+  default resolver.
+
+Therefore the application MUST NOT be described as fully preventing DNS
+rebinding. The reliable control is to run the browser where private and internal
+addresses are simply **unreachable at the network layer**, so that even a
+successful rebind connects to nothing.
+
+### Why browser execution requires network isolation
+
+The browser executes untrusted content (arbitrary third-party sites, their
+JavaScript, their redirects). If that process can reach internal infrastructure,
+a hostile page or a rebind can turn the browser into a pivot into your private
+network, cloud metadata service, databases, or management endpoints. Isolating
+the browser worker's egress removes that entire class of pivot regardless of
+what the page or DNS does.
+
+### Ranges and endpoints that MUST be unreachable from the browser worker
+
+The network environment must block outbound connections from the browser worker
+to all of the following:
+
+- `127.0.0.0/8` (IPv4 loopback)
+- `10.0.0.0/8` (RFC1918 private)
+- `172.16.0.0/12` (RFC1918 private)
+- `192.168.0.0/16` (RFC1918 private)
+- `169.254.0.0/16` (IPv4 link-local), **including `169.254.169.254`**
+- IPv6 loopback `::1`, link-local `fe80::/10`, and unique-local `fc00::/7`
+- Cloud provider metadata endpoints (AWS/GCP/Azure/OpenStack `169.254.169.254`,
+  Alibaba `100.100.100.200`, Oracle `192.0.0.192`, and the GCP
+  `metadata.google.internal` hostname)
+- Internal databases, internal APIs, private VPC services, and any
+  infrastructure/management endpoints
+
+Outbound access should be restricted to public HTTP/HTTPS (ports 80/443) only.
+
+### Why cloud metadata endpoints must be blocked
+
+Instance metadata services (reachable at link-local addresses such as
+`169.254.169.254`) hand out temporary cloud credentials, instance identity, and
+configuration to anything that can make an HTTP request from the host. If the
+browser worker can reach them, a hostile page or a DNS rebind can exfiltrate
+IAM/role credentials and escalate from "renders a video" to "controls your cloud
+account". Blocking these endpoints at the network layer (and, on AWS, enforcing
+IMDSv2 and/or disabling IMDS for the browser host) is mandatory. The application
+blocklist is a backstop only.
+
+### This is an infrastructure requirement
+
+No application-level code in this repository enforces the above, and none can be
+trusted to. The enforcement must be implemented in the cloud/network environment
+(security groups, NACLs, egress firewall rules, a locked-down subnet/VPC, and/or
+a forward proxy with an allow policy). The application provides optional hooks
+(`BROWSER_PROXY_SERVER` / `BROWSER_PROXY_BYPASS`, see `.env.example` and
+`src/lib/browser/network-config.ts`) so all browser traffic can be forced
+through a controlled egress proxy, but the proxy/firewall — not the app — is the
+boundary.
+
+See `DEPLOYMENT.md` for the concrete, provider-agnostic configuration templates
+and the deployment checklist.
 
 ### Prompt injection
 Website text is fed to the AI, so a page may contain "ignore previous
@@ -168,11 +253,14 @@ reaches a shell, a filesystem path, or an eval.
 
 ## Limitations (known residual risk)
 
-- **No authentication.** Until real auth lands, demos are effectively
-  single-tenant/public to anyone who can reach the server. The authorization
-  boundary is a seam, not an enforced identity check.
-- **DNS rebinding** cannot be fully eliminated at the app layer with Playwright's
-  default resolver — compensate with network egress controls.
+- **DNS rebinding is NOT closed by application code.** Playwright's resolver and
+  our URL validation are defense in depth only. The risk remains open until the
+  browser worker runs in an isolated network with enforced egress controls (see
+  "Browser Network Isolation" and `DEPLOYMENT.md`). Do not treat this as resolved
+  until that isolation is deployed and verified.
+- **Authentication/session/user stores are in-memory** (per process). They are
+  lost on restart and not shared across instances; back them with a database/
+  Redis before production.
 - **Prompt injection** is mitigated, not eliminated; structured-output
   validation is the guarantee that injection cannot cause code execution.
 - **Rate limiting and the concurrency gate are per-process** (in-memory).

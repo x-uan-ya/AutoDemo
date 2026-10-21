@@ -9,6 +9,7 @@ import type { BrowserAction, ActionExecutionResult } from "./types";
 import { browserActionSchema } from "./schemas";
 import { checkNavigationTarget, flagDestructiveAction } from "./action-security";
 import { HARDENED_LAUNCH_ARGS } from "./sandbox";
+import { browserProxyLaunchOptions } from "./network-config";
 import { isHostAllowedSync } from "@/lib/security/url-validator";
 import { logSecurityEvent } from "@/lib/security/log";
 
@@ -103,6 +104,8 @@ export async function executeActions(
     browser = await chromium.launch({
       headless: true,
       args: HARDENED_LAUNCH_ARGS,
+      // Optional egress proxy; the network layer still owns enforcement.
+      ...browserProxyLaunchOptions(),
     });
     const context = await browser.newContext({
       viewport: VIEWPORT,

@@ -8,6 +8,7 @@ import { validateExploreUrl } from "./url-validator";
 import { isHostAllowedSync } from "@/lib/security/url-validator";
 import { logSecurityEvent } from "@/lib/security/log";
 import { HARDENED_LAUNCH_ARGS } from "./sandbox";
+import { browserProxyLaunchOptions } from "./network-config";
 import {
   ExplorerError,
   type ExploredButton,
@@ -59,6 +60,8 @@ export async function exploreWebsite(
     browser = await chromium.launch({
       headless: true,
       args: HARDENED_LAUNCH_ARGS,
+      // Optional egress proxy; the network layer still owns enforcement.
+      ...browserProxyLaunchOptions(),
     });
 
     const context = await browser.newContext({

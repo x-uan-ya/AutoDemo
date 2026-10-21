@@ -111,14 +111,20 @@ Response: { "success": true, "data": { ...WebsiteExploration } }
       or  { "success": false, "error": { "code", "message" } }
 ```
 
-**Security (SSRF protection).** `url-validator.ts` runs server-side and rejects
-anything that is not a public `https://` host: non-https schemes
-(`http`, `file:`, `javascript:`, `data:`), `localhost` / `*.local` /
-`*.internal`, literal loopback/private/link-local/unique-local/CGNAT/multicast
-IPs, and cloud metadata addresses (e.g. `169.254.169.254`). Hostnames are
-resolved via DNS and every resolved address is checked, so a public-looking name
-that points at an internal IP is also rejected. The final URL after redirects is
-re-validated before any data is returned.
+**Security (SSRF defense in depth).** The central validator
+(`src/lib/security/url-validator.ts`, re-exported by the browser
+`url-validator.ts`) runs server-side and allows only public `http://` and
+`https://` hosts, rejecting other schemes (`file:`, `javascript:`, `data:`,
+etc.), `localhost` / `*.local` / `*.internal`, literal
+loopback/private/link-local/unique-local/CGNAT/multicast IPs, and cloud metadata
+addresses (e.g. `169.254.169.254`). Hostnames are resolved via DNS and every
+resolved address is checked, and the final URL after redirects is re-validated.
+
+This validation is **defense in depth, not the final security boundary.** It
+cannot fully eliminate DNS rebinding — Chromium resolves hostnames at navigation
+time and may connect to a different address than the one validated. The browser
+worker MUST additionally run in a network-isolated environment with egress
+controls (see `SECURITY.md` → "Browser Network Isolation" and `DEPLOYMENT.md`).
 
 No LLM is involved in exploration. It proves the path USER → URL → Playwright →
 website data works reliably.
@@ -561,11 +567,28 @@ npm run build      # production build
 npm run start      # run the production build
 npm run lint       # eslint
 npm run typecheck  # tsc --noEmit
+npm test           # security + unit tests
 ```
+
+## Security & deployment
+
+Security posture and controls are documented in:
+
+- `SECURITY.md` — threat model, trust boundaries, SSRF/auth/CSRF/CORS controls,
+  and the **Browser Network Isolation** requirements.
+- `DEPLOYMENT.md` — the required network isolation model for the browser worker,
+  a deployment checklist, and provider-agnostic configuration templates.
+- `SECURITY_AUDIT.md` / `SECURITY_AUDIT_AUTH.md` — audit findings and status.
+
+**Before exposing the browser worker to the public internet**, it MUST run in an
+isolated subnet/VPC with network-level egress controls (public 80/443 only;
+private RFC1918/link-local ranges and cloud metadata endpoints unreachable).
+Application-level URL validation is defense in depth and does **not** fully
+eliminate DNS rebinding — that risk stays open until the network isolation is
+deployed and verified. See `DEPLOYMENT.md`.
 
 ## Not included yet (intentionally)
 
-- No authentication.
 - No text-to-speech or video generation.
 - No autonomous browser interaction. The explorer is passive (read-only): it
   does not click, type, or submit. Feature Discovery only analyzes the captured
