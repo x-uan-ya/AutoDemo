@@ -99,7 +99,10 @@ Supporting items:
 - [ ] Cloud instance metadata hardened on the worker host (AWS: IMDSv2 required or IMDS disabled; equivalents on other clouds).
 - [ ] `BROWSER_PROXY_SERVER` set if egressing through a controlled forward proxy; proxy enforces the allow policy.
 - [ ] App served over HTTPS in production (required for `Secure` / `__Host-` session cookies).
-- [ ] User/session/rate-limit stores backed by a shared database/Redis (the in-memory defaults are dev-only).
+- [ ] Production/multi-instance deployment uses Redis-backed rate limiting.
+- [ ] Production/multi-instance deployment uses Redis-backed concurrency control.
+- [ ] Redis connectivity and failure behavior have been tested.
+- [ ] User/session stores backed by a shared database/Redis (the in-memory defaults are dev-only).
 - [ ] Egress isolation verified from inside the worker (see "Verifying" below).
 
 ---
@@ -127,6 +130,92 @@ curl -m 5 https://example.com/  ; echo "exit=$?"
 ```
 
 Treat any success against a private/metadata target as a blocking failure.
+
+---
+
+## Shared State / Redis
+
+AutoDemo's **rate limiter** and **heavy-job concurrency gate** are shared
+coordination state. By default they live in process memory, which is only
+correct for a single process.
+
+### Why in-memory rate limiting is unsafe across multiple instances
+
+A fixed-window limiter keeps a per-key counter. If each of N instances keeps its
+own counter, a client spread across them can make up to N times the intended
+requests before any single instance trips its limit. The effective limit becomes
+roughly `max * N` — the protection silently weakens exactly as you scale out.
+
+### Why the concurrency gate must also be shared
+
+The gate caps simultaneous heavy jobs (browser exploration, recording,
+rendering) to protect CPU, memory, and cost. A per-process counter means each
+instance allows `MAX_CONCURRENT_JOBS` independently, so N instances allow
+`MAX_CONCURRENT_JOBS * N` heavy jobs at once — potentially overwhelming shared
+resources (and your AI/API spend).
+
+### Why Redis is the source of shared coordination
+
+Redis executes operations atomically and is reachable by every instance, so it
+is the single source of truth. AutoDemo uses atomic Lua scripts:
+
+- **Rate limit**: `INCR` + `PEXPIRE` in one script — concurrent instances cannot
+  race between read and write, and keys self-expire (stale windows disappear).
+- **Concurrency gate**: a sorted set of leases keyed by a unique lease id, with
+  an expiry score. Acquire prunes expired leases, checks capacity, and adds a
+  lease atomically. Release removes only the caller's own lease id, so one
+  worker can never free another's slot. Each lease has a TTL, so a crashed
+  worker's slot is reclaimed automatically.
+
+### Required environment variables
+
+See `.env.example` for full notes. Summary:
+
+- `REDIS_URL` — connection string (e.g. `rediss://:password@host:6379/0`). Its
+  presence enables the Redis backend.
+- `REDIS_TLS` — `true` to force TLS (or use a `rediss://` URL).
+- `SHARED_STATE_BACKEND` — explicit `redis` | `memory` override.
+- `JOB_SLOT_TTL_MS` — concurrency lease TTL (default 600000); must exceed your
+  longest heavy job.
+
+The `ioredis` package must be installed where Redis is used (it is an
+`optionalDependency`): `npm install ioredis`.
+
+### Redis failure behavior (fail-closed)
+
+If Redis is configured but unavailable, AutoDemo does **not** fall back to "no
+limit":
+
+- **Rate limiter**: a store error makes the check return "not allowed" with a
+  short retry-after. An outage cannot be used to bypass limits.
+- **Concurrency gate**: acquire returns no slot (the route responds "server
+  busy", HTTP 503) rather than granting unbounded concurrency. Release is
+  best-effort; if Redis is down at release time, the lease TTL reclaims the slot.
+
+A security event is logged in both cases.
+
+### Startup behavior
+
+A startup hook (`src/instrumentation.ts`) logs the active backend and, in
+production, **refuses to start** with per-process limits unless you explicitly
+set `SHARED_STATE_BACKEND=memory` (single-instance opt-in, which logs a loud
+warning). This prevents accidentally deploying multi-instance with unsafe
+limits.
+
+### Running locally
+
+Do nothing — with no `REDIS_URL`, the app uses the in-memory backend, which is
+correct for a single dev process and for the test suite. To exercise the Redis
+path locally, run a Redis (e.g. `docker run -p 6379:6379 redis`), install
+`ioredis`, and set `REDIS_URL=redis://localhost:6379/0`.
+
+### Configuring production
+
+Provision a Redis (managed or self-hosted, TLS + auth), install `ioredis`, set
+`REDIS_URL` (and `REDIS_TLS=true` if not using `rediss://`), and ensure every
+instance points at the SAME Redis. Verify connectivity and the fail-closed
+behavior (stop Redis and confirm requests are denied / jobs report busy, not
+allowed through).
 
 ---
 

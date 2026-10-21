@@ -92,7 +92,7 @@ export async function POST(
   }
 
   // Global concurrency gate: cap simultaneous heavy render jobs server-wide.
-  const releaseSlot = acquireJobSlot();
+  const releaseSlot = await acquireJobSlot();
   if (!releaseSlot) {
     return NextResponse.json(
       {
@@ -145,6 +145,6 @@ export async function POST(
       { status: isConfig ? 400 : 500 }
     );
   } finally {
-    releaseSlot();
+    await releaseSlot();
   }
 }

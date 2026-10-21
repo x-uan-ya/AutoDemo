@@ -83,7 +83,7 @@ export async function POST(
   }
 
   // Global concurrency gate: cap simultaneous heavy browser jobs server-wide.
-  const releaseSlot = acquireJobSlot();
+  const releaseSlot = await acquireJobSlot();
   if (!releaseSlot) {
     await repo.finishRecording(id, failedRecording("Server is busy. Try again shortly."));
     return NextResponse.json(
@@ -123,7 +123,7 @@ export async function POST(
     });
   } finally {
     // Always release the concurrency slot (browser cleanup is in the recorder).
-    releaseSlot();
+    await releaseSlot();
   }
 }
 

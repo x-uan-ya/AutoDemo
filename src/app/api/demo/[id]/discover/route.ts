@@ -37,7 +37,7 @@ export async function POST(
   if (guard.response) return guard.response;
   const job = guard.job!;
 
-  const releaseSlot = acquireJobSlot();
+  const releaseSlot = await acquireJobSlot();
   if (!releaseSlot) {
     return NextResponse.json(
       {
@@ -98,6 +98,6 @@ export async function POST(
       clientMessage: "An unexpected error occurred during feature discovery.",
     });
   } finally {
-    releaseSlot();
+    await releaseSlot();
   }
 }

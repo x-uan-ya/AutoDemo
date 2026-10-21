@@ -1,15 +1,21 @@
 import { NextResponse } from "next/server";
 import { logSecurityEvent } from "./log";
+import { getRedis, isRedisConfigured } from "@/lib/redis/client";
+import { RATE_LIMIT_LUA } from "@/lib/redis/scripts";
 
 /**
  * Server-side rate limiting.
  *
- * In-memory fixed-window limiter behind a small interface so a Redis-backed
- * store can be dropped in for multi-instance production deployments without
- * changing call sites. Expensive endpoints use stricter limits.
+ * Fixed-window limiter behind a small `RateLimitStore` interface. Two backends:
+ *   - MemoryStore: per-process, for local dev / tests / single-instance.
+ *   - RedisStore: shared across instances via an atomic Lua INCR+PEXPIRE, for
+ *     multi-instance production. Selected automatically when Redis is
+ *     configured (REDIS_URL / SHARED_STATE_BACKEND=redis).
  *
- * NOTE: the in-memory store is per-process. For horizontal scaling, implement
- * `RateLimitStore` against Redis (INCR + EXPIRE) and swap `store`.
+ * The public API (RATE_LIMITS, checkRateLimit, enforceRateLimit) is unchanged.
+ *
+ * WARNING: a per-process MemoryStore under N instances multiplies the effective
+ * limit by ~N. Production must use Redis — see assertProductionHasRedis().
  */
 
 export interface RateLimitRule {
@@ -45,10 +51,42 @@ class MemoryStore implements RateLimitStore {
   }
 }
 
+/**
+ * Redis-backed fixed-window store. Atomic via a Lua INCR+PEXPIRE so concurrent
+ * instances share one counter and cannot race past the limit. Keys self-expire
+ * via PEXPIRE, so stale windows disappear without cleanup.
+ *
+ * Fail-closed: if Redis errors, `hit` throws; the limiter treats that as "not
+ * allowed" (see checkRateLimit) rather than silently permitting the request.
+ */
+class RedisStore implements RateLimitStore {
+  async hit(key: string, windowMs: number): Promise<{ count: number; resetAt: number }> {
+    const redis = await getRedis();
+    if (!redis) throw new Error("rate-limit: Redis not available");
+    const now = Date.now();
+    const res = (await redis.eval(RATE_LIMIT_LUA, 1, key, windowMs, now)) as [
+      number,
+      number
+    ];
+    const count = Number(res[0]);
+    const resetAt = Number(res[1]);
+    return { count, resetAt };
+  }
+}
+
 const globalForRl = globalThis as unknown as { __autodemoRlStore?: RateLimitStore };
 function getStore(): RateLimitStore {
-  if (!globalForRl.__autodemoRlStore) globalForRl.__autodemoRlStore = new MemoryStore();
+  if (!globalForRl.__autodemoRlStore) {
+    globalForRl.__autodemoRlStore = isRedisConfigured()
+      ? new RedisStore()
+      : new MemoryStore();
+  }
   return globalForRl.__autodemoRlStore;
+}
+
+/** Test seam: force a specific store (e.g. RedisStore over a FakeRedis). */
+export function __setRateLimitStore(store: RateLimitStore | null): void {
+  globalForRl.__autodemoRlStore = store ?? undefined;
 }
 
 /** Per-endpoint rules. Expensive operations are stricter. */
@@ -86,7 +124,14 @@ export interface RateLimitResult {
   retryAfterSec: number;
 }
 
-/** Check (and consume) one unit against a named bucket. */
+/**
+ * Check (and consume) one unit against a named bucket.
+ *
+ * Fail-closed: if the backing store errors (e.g. Redis is unavailable), we do
+ * NOT silently allow the request — we return `ok: false` with a short
+ * retry-after, so an outage cannot be used to bypass rate limits. A diagnostic
+ * is logged.
+ */
 export async function checkRateLimit(
   bucket: keyof typeof RATE_LIMITS | RateLimitRule,
   key: string
@@ -94,7 +139,29 @@ export async function checkRateLimit(
   const rule: RateLimitRule =
     typeof bucket === "string" ? RATE_LIMITS[bucket] : bucket;
   const name = typeof bucket === "string" ? bucket : "custom";
-  const { count, resetAt } = await getStore().hit(`${name}:${key}`, rule.windowMs);
+
+  let count: number;
+  let resetAt: number;
+  try {
+    const res = await getStore().hit(`${name}:${key}`, rule.windowMs);
+    count = res.count;
+    resetAt = res.resetAt;
+  } catch (err) {
+    logSecurityEvent("rate_limited", {
+      bucket: name,
+      reason: "store_unavailable_fail_closed",
+      error: err instanceof Error ? err.message : "unknown",
+    });
+    const retryAfterSec = Math.max(1, Math.ceil(rule.windowMs / 1000));
+    return {
+      ok: false,
+      limit: rule.max,
+      remaining: 0,
+      resetAt: Date.now() + rule.windowMs,
+      retryAfterSec,
+    };
+  }
+
   const remaining = Math.max(0, rule.max - count);
   const ok = count <= rule.max;
   return {

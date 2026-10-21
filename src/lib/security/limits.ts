@@ -63,24 +63,109 @@ export const LIMITS = {
 // Global concurrency gate for heavy jobs (browser/record/render)
 // ---------------------------------------------------------------------------
 
-const globalForJobs = globalThis as unknown as { __autodemoActiveJobs?: number };
+import { randomUUID } from "node:crypto";
+import { getRedis, isRedisConfigured } from "@/lib/redis/client";
+import { ACQUIRE_SLOT_LUA, RELEASE_SLOT_LUA } from "@/lib/redis/scripts";
+import { logSecurityEvent } from "./log";
 
-function active(): number {
-  return globalForJobs.__autodemoActiveJobs ?? 0;
+/** A release handle; calling it frees the slot. Idempotent. */
+export type ReleaseSlot = () => Promise<void>;
+
+/**
+ * Lease TTL for a heavy-job slot. A crashed/stuck worker's slot is reclaimed
+ * after this long so it cannot be consumed forever. Must comfortably exceed the
+ * longest heavy job (browser record/render). Override via JOB_SLOT_TTL_MS.
+ */
+export const JOB_SLOT_TTL_MS = intEnv("JOB_SLOT_TTL_MS", 10 * 60_000);
+
+/** Redis key holding the set of active job leases. */
+const SLOT_KEY = "autodemo:jobslots";
+
+// ---- Memory backend (per-process; dev/test/single-instance) ----------------
+
+interface MemoryLease {
+  id: string;
+  expiresAt: number;
+}
+const globalForJobs = globalThis as unknown as { __autodemoJobLeases?: Map<string, MemoryLease> };
+function memLeases(): Map<string, MemoryLease> {
+  if (!globalForJobs.__autodemoJobLeases) globalForJobs.__autodemoJobLeases = new Map();
+  return globalForJobs.__autodemoJobLeases;
+}
+function memPrune(now: number): void {
+  for (const [id, lease] of memLeases()) if (lease.expiresAt <= now) memLeases().delete(id);
+}
+
+function memAcquire(): ReleaseSlot | null {
+  const now = Date.now();
+  memPrune(now);
+  if (memLeases().size >= MAX_CONCURRENT_JOBS) return null;
+  const id = randomUUID();
+  memLeases().set(id, { id, expiresAt: now + JOB_SLOT_TTL_MS });
+  let released = false;
+  return async () => {
+    if (released) return;
+    released = true;
+    memLeases().delete(id); // only ever removes THIS lease id
+  };
+}
+
+// ---- Redis backend (shared across instances) -------------------------------
+
+async function redisAcquire(): Promise<ReleaseSlot | null> {
+  const redis = await getRedis();
+  if (!redis) {
+    // Redis is configured but unreachable: FAIL CLOSED. Do not grant unlimited
+    // concurrency — deny the slot so the caller returns "server busy".
+    logSecurityEvent("limit_exceeded", {
+      resource: "job_slot",
+      reason: "redis_unavailable_fail_closed",
+    });
+    return null;
+  }
+  const leaseId = randomUUID();
+  try {
+    const now = Date.now();
+    const ok = (await redis.eval(
+      ACQUIRE_SLOT_LUA,
+      1,
+      SLOT_KEY,
+      MAX_CONCURRENT_JOBS,
+      now,
+      leaseId,
+      JOB_SLOT_TTL_MS
+    )) as number;
+    if (Number(ok) !== 1) return null;
+  } catch (err) {
+    logSecurityEvent("limit_exceeded", {
+      resource: "job_slot",
+      reason: "redis_error_fail_closed",
+      error: err instanceof Error ? err.message : "unknown",
+    });
+    return null; // fail closed
+  }
+
+  let released = false;
+  return async () => {
+    if (released) return;
+    released = true;
+    try {
+      const r = await getRedis();
+      // ARGV = leaseId; the Lua ZREM only removes THIS lease, never another's.
+      if (r) await r.eval(RELEASE_SLOT_LUA, 1, SLOT_KEY, leaseId);
+    } catch {
+      // Release best-effort: if Redis is down, the lease TTL reclaims the slot.
+    }
+  };
 }
 
 /**
- * Try to claim a heavy-job slot. Returns a release function on success, or null
- * when the server is at MAX_CONCURRENT_JOBS. Always call the returned release
- * in a finally block.
+ * Try to claim a heavy-job slot. Resolves to a release function on success, or
+ * null when at MAX_CONCURRENT_JOBS (or when the shared backend is unavailable —
+ * fail closed). Always `await release()` in a finally block.
+ *
+ * Shared across instances when Redis is configured; per-process otherwise.
  */
-export function acquireJobSlot(): (() => void) | null {
-  if (active() >= MAX_CONCURRENT_JOBS) return null;
-  globalForJobs.__autodemoActiveJobs = active() + 1;
-  let released = false;
-  return () => {
-    if (released) return;
-    released = true;
-    globalForJobs.__autodemoActiveJobs = Math.max(0, active() - 1);
-  };
+export async function acquireJobSlot(): Promise<ReleaseSlot | null> {
+  return isRedisConfigured() ? redisAcquire() : memAcquire();
 }

@@ -39,5 +39,8 @@
     "tailwindcss": "^3.4.14",
     "tsx": "^4.23.15",
     "typescript": "^5.5.4"
+  },
+  "optionalDependencies": {
+    "ioredis": "^5.4.1"
   }
 }

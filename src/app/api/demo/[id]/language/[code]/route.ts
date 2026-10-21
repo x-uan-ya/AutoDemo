@@ -92,7 +92,7 @@ export async function POST(
   }
 
   // Global concurrency gate (translate + voice + render is heavy).
-  const releaseSlot = acquireJobSlot();
+  const releaseSlot = await acquireJobSlot();
   if (!releaseSlot) {
     await repo.upsertLanguageVersion(id, failedLanguageVersion(code, job));
     return NextResponse.json(
@@ -130,7 +130,7 @@ export async function POST(
       { status: 500 }
     );
   } finally {
-    releaseSlot();
+    await releaseSlot();
   }
 }
 
