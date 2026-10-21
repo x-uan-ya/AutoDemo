@@ -6,6 +6,8 @@ import { enforceRateLimit } from "@/lib/security/rate-limit";
 import { MAX_URL_LENGTH } from "@/lib/security/limits";
 import { safeErrorResponse } from "@/lib/security/errors";
 import { logSecurityEvent } from "@/lib/security/log";
+import { authenticate } from "@/lib/auth/session";
+import { verifyCsrf } from "@/lib/auth/csrf";
 
 /**
  * POST /api/explore
@@ -41,6 +43,25 @@ export async function POST(request: Request) {
   // Rate limit before doing any work (the explorer is expensive).
   const limited = await enforceRateLimit(request, "explore", "/api/explore");
   if (limited) return limited;
+
+  // The explorer is an expensive, SSRF-sensitive operation — require an
+  // authenticated user (no demo ownership check: this does not touch a demo).
+  const auth = await authenticate(request);
+  if (!auth) {
+    logSecurityEvent("authz_denied", { route: "/api/explore", reason: "unauthenticated" });
+    return NextResponse.json(
+      { success: false, error: { code: "unauthenticated", message: "You must be signed in to do that." } },
+      { status: 401 }
+    );
+  }
+  // CSRF: this is a state-changing POST triggered by a cookie-authenticated UI.
+  if (!verifyCsrf(request, auth.session)) {
+    logSecurityEvent("authz_denied", { route: "/api/explore", reason: "csrf", principal: auth.user.id });
+    return NextResponse.json(
+      { success: false, error: { code: "csrf_failed", message: "Invalid or missing CSRF token." } },
+      { status: 403 }
+    );
+  }
 
   let body: unknown;
   try {

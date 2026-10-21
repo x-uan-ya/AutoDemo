@@ -15,7 +15,12 @@ export type SecurityEvent =
   | "job_failed"
   | "invalid_input"
   | "path_rejected"
-  | "limit_exceeded";
+  | "limit_exceeded"
+  | "auth_registered"
+  | "auth_login_success"
+  | "auth_login_failed"
+  | "auth_logout"
+  | "cors_blocked";
 
 /** Keys that must never be logged with a value. */
 const REDACT_KEYS = new Set([

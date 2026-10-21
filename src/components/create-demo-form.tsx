@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Loader2, Compass } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ExplorationResult } from "@/components/exploration-result";
+import { apiFetch } from "@/lib/auth/client";
 import {
   DURATION_OPTIONS,
   LANGUAGE_OPTIONS,
@@ -62,7 +63,7 @@ export function CreateDemoForm() {
 
     setPhase("exploring");
     try {
-      const res = await fetch("/api/explore", {
+      const res = await apiFetch("/api/explore", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url }),

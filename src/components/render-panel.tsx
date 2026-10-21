@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { formatSeconds } from "@/lib/utils";
+import { apiFetch } from "@/lib/auth/client";
 import { LANGUAGE_OPTIONS, VOICE_OPTIONS, PURPOSE_OPTIONS, labelFor } from "@/lib/options";
 import type { DemoLanguage, DemoVoice, DemoPurpose, RenderResult } from "@/types";
 
@@ -83,7 +84,7 @@ export function RenderPanel({
     setError(null);
     startProgress();
     try {
-      const res = await fetch(`/api/demo/${jobId}/render`, { method: "POST" });
+      const res = await apiFetch(`/api/demo/${jobId}/render`, { method: "POST" });
       const json = await res.json();
       stopProgress();
       if (res.status === 409) {

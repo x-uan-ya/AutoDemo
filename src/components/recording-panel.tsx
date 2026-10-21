@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn, formatSeconds } from "@/lib/utils";
+import { apiFetch } from "@/lib/auth/client";
 import type { RecordingResult } from "@/lib/browser/types";
 
 interface ApiError {
@@ -89,7 +90,7 @@ export function RecordingPanel({
     setRecording(undefined);
     startProgressSimulation();
     try {
-      const res = await fetch(`/api/demo/${jobId}/record`, { method: "POST" });
+      const res = await apiFetch(`/api/demo/${jobId}/record`, { method: "POST" });
       const json = await res.json();
       stopProgressSimulation();
 

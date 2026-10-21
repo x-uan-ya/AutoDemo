@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { apiFetch } from "@/lib/auth/client";
 import type { QualityReport, ActionQualityItem } from "@/types";
 
 interface ApiError { code: string; message: string; }
@@ -43,7 +44,7 @@ export function QualityCheckPanel({
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/demo/${jobId}/quality-check`, { method: "POST" });
+      const res = await apiFetch(`/api/demo/${jobId}/quality-check`, { method: "POST" });
       const json = await res.json();
       if (!res.ok || !json.success) {
         setError(json?.error ?? { code: "error", message: "Quality check failed." });
@@ -65,7 +66,7 @@ export function QualityCheckPanel({
     const key = `${sceneId}::${actionId}`;
     setReviewing(key);
     try {
-      const res = await fetch(`/api/demo/${jobId}/quality-check`, {
+      const res = await apiFetch(`/api/demo/${jobId}/quality-check`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sceneId, actionId, decision }),

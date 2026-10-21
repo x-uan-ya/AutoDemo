@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn, formatSeconds } from "@/lib/utils";
+import { apiFetch } from "@/lib/auth/client";
 import {
   SUPPORTED_DEMO_LANGUAGES,
   type DemoLanguageCode,
@@ -54,7 +55,7 @@ export function MultilingualPanel({
     setBusyLang(code);
     setError(null);
     try {
-      const res = await fetch(`/api/demo/${jobId}/language/${code}`, {
+      const res = await apiFetch(`/api/demo/${jobId}/language/${code}`, {
         method: "POST",
       });
       const json = await res.json();

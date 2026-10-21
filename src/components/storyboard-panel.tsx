@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn, formatSeconds } from "@/lib/utils";
+import { apiFetch } from "@/lib/auth/client";
 import { computePlanMetrics } from "@/lib/planner/duration-planner";
 import { PURPOSE_OPTIONS, labelFor } from "@/lib/options";
 import type { DemoPlan, PlanScene } from "@/types";
@@ -66,7 +67,7 @@ export function StoryboardPanel({
     setBusy({ kind: "generate" });
     setError(null);
     try {
-      const res = await fetch(`/api/demo/${jobId}/plan`, { method: "POST" });
+      const res = await apiFetch(`/api/demo/${jobId}/plan`, { method: "POST" });
       const json = await res.json();
       if (!res.ok || !json.success) {
         setError(json?.error ?? { code: "error", message: "Planning failed." });
@@ -82,7 +83,7 @@ export function StoryboardPanel({
 
   // Persist the full scene list (used for edit/reorder/remove).
   async function persistScenes(nextScenes: PlanScene[]) {
-    const res = await fetch(`/api/demo/${jobId}/plan`, {
+    const res = await apiFetch(`/api/demo/${jobId}/plan`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -151,7 +152,7 @@ export function StoryboardPanel({
     setBusy({ kind: "scene", id, action: "regen" });
     setError(null);
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/demo/${jobId}/plan/scene/${id}/regenerate`,
         { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }
       );
@@ -172,7 +173,7 @@ export function StoryboardPanel({
     setBusy({ kind: "approve" });
     setError(null);
     try {
-      const res = await fetch(`/api/demo/${jobId}/plan/approve`, {
+      const res = await apiFetch(`/api/demo/${jobId}/plan/approve`, {
         method: "POST",
       });
       const json = await res.json();

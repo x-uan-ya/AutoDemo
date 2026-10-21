@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getRepository } from "@/lib/repository";
+import { guardDemoRoute } from "@/lib/security/route-guard";
 
 /**
  * POST /api/demo/[id]/plan/approve
@@ -10,10 +11,15 @@ import { getRepository } from "@/lib/repository";
 export const runtime = "nodejs";
 
 export async function POST(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+
+  // Auth + CSRF + ownership before approving.
+  const guard = await guardDemoRoute(request, id, "default", "/api/demo/[id]/plan/approve");
+  if (guard.response) return guard.response;
+
   const updated = await getRepository().approvePlan(id);
   if (!updated) {
     return NextResponse.json(

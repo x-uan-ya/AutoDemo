@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getRepository } from "@/lib/repository";
 import { regenerateScene, AiError } from "@/lib/planner/demo-planner";
+import { guardDemoRoute } from "@/lib/security/route-guard";
 
 /**
  * POST /api/demo/[id]/plan/scene/[sceneId]/regenerate
@@ -22,9 +23,19 @@ export async function POST(
   { params }: { params: Promise<{ id: string; sceneId: string }> }
 ) {
   const { id, sceneId } = await params;
+
+  // Auth + CSRF + ownership before regenerating.
+  const guard = await guardDemoRoute(
+    request,
+    id,
+    "actions",
+    "/api/demo/[id]/plan/scene/[sceneId]/regenerate"
+  );
+  if (guard.response) return guard.response;
+
   const repo = getRepository();
-  const job = await repo.getById(id);
-  if (!job || !job.plan) {
+  const job = guard.job!;
+  if (!job.plan) {
     return NextResponse.json(
       { success: false, error: { code: "not_found", message: "No storyboard found." } },
       { status: 404 }

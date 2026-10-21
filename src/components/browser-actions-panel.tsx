@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { apiFetch } from "@/lib/auth/client";
 import type {
   ActionPlan,
   BrowserAction,
@@ -61,7 +62,7 @@ export function BrowserActionsPanel({
     setGenerating(true);
     setError(null);
     try {
-      const res = await fetch(`/api/demo/${jobId}/actions`, {
+      const res = await apiFetch(`/api/demo/${jobId}/actions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ demoId: jobId }),
@@ -84,7 +85,7 @@ export function BrowserActionsPanel({
     setSavingScene(sceneId);
     setError(null);
     try {
-      const res = await fetch(`/api/demo/${jobId}/actions`, {
+      const res = await apiFetch(`/api/demo/${jobId}/actions`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sceneId, actions }),
@@ -106,7 +107,7 @@ export function BrowserActionsPanel({
     setApproving(true);
     setError(null);
     try {
-      const res = await fetch(`/api/demo/${jobId}/actions/approve`, {
+      const res = await apiFetch(`/api/demo/${jobId}/actions/approve`, {
         method: "POST",
       });
       const json = await res.json();

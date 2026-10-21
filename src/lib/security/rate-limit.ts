@@ -59,6 +59,10 @@ export const RATE_LIMITS = {
   voice: { windowMs: 300_000, max: 10 },
   render: { windowMs: 600_000, max: 5 },
   language: { windowMs: 600_000, max: 6 },
+  // Auth endpoints: strict enough to blunt credential-stuffing / brute force,
+  // loose enough that a legitimate user who mistypes a few times is fine.
+  login: { windowMs: 300_000, max: 10 },
+  register: { windowMs: 3_600_000, max: 5 },
   default: { windowMs: 60_000, max: 60 },
 } as const satisfies Record<string, RateLimitRule>;
 

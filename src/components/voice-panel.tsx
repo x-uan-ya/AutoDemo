@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn, formatSeconds } from "@/lib/utils";
+import { apiFetch } from "@/lib/auth/client";
 import { LANGUAGE_OPTIONS, VOICE_OPTIONS, labelFor } from "@/lib/options";
 import type { DemoLanguage } from "@/types";
 import type { VoiceOver, SceneAudio } from "@/lib/tts/types";
@@ -83,7 +84,7 @@ export function VoicePanel({
     setError(null);
     startProgress();
     try {
-      const res = await fetch(`/api/demo/${jobId}/voice`, {
+      const res = await apiFetch(`/api/demo/${jobId}/voice`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({}),
@@ -108,7 +109,7 @@ export function VoicePanel({
     setRegenId(sceneId);
     setError(null);
     try {
-      const res = await fetch(`/api/demo/${jobId}/voice`, {
+      const res = await apiFetch(`/api/demo/${jobId}/voice`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sceneId }),

@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { apiFetch } from "@/lib/auth/client";
 import type { DiscoveredFeature, FeatureDiscoveryMeta } from "@/types";
 
 interface ApiError {
@@ -51,7 +52,7 @@ export function FeatureDiscoveryPanel({
     setPhase("discovering");
     setError(null);
     try {
-      const res = await fetch(`/api/demo/${jobId}/discover`, {
+      const res = await apiFetch(`/api/demo/${jobId}/discover`, {
         method: "POST",
       });
       const json = await res.json();
@@ -85,7 +86,7 @@ export function FeatureDiscoveryPanel({
     );
     setPendingId(feature.id);
     try {
-      const res = await fetch(`/api/demo/${jobId}/features`, {
+      const res = await apiFetch(`/api/demo/${jobId}/features`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ featureId: feature.id, selected: next }),

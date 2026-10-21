@@ -1,10 +1,15 @@
+import { redirect } from "next/navigation";
 import { CreateDemoForm } from "@/components/create-demo-form";
+import { getCurrentUser } from "@/lib/auth/server";
 
 export const metadata = {
   title: "Create Demo — AutoDemo",
 };
 
-export default function CreatePage() {
+export default async function CreatePage() {
+  const user = await getCurrentUser();
+  if (!user) redirect("/login?next=/create");
+
   return (
     <div className="mx-auto max-w-2xl">
       <div>

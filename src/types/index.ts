@@ -265,6 +265,11 @@ export interface PipelineStageState {
 
 export interface DemoJob {
   id: string;
+  /**
+   * Owner (user) id. Demos are private to their owner. Seeded sample demos use
+   * the reserved SEED_OWNER_ID and are shared/read-only sample data.
+   */
+  ownerId?: string;
   title: string;
   settings: DemoSettings;
   status: DemoStatus;

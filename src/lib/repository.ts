@@ -20,6 +20,7 @@ import type { DemoStatus } from "@/types";
 import { MOCK_JOBS } from "@/data/mock-jobs";
 import { createInitialPipeline } from "@/lib/pipeline";
 import { secureId } from "@/lib/security/ids";
+import { SEED_OWNER_ID } from "@/lib/security/authz";
 
 /**
  * Persistence boundary for demo jobs.
@@ -30,9 +31,10 @@ import { secureId } from "@/lib/security/ids";
  * interface and be swapped in via `getRepository()` with no changes to callers.
  */
 export interface DemoJobRepository {
-  list(): Promise<DemoJob[]>;
+  /** List demos owned by a principal (plus shared seed demos). */
+  list(ownerId: string): Promise<DemoJob[]>;
   getById(id: string): Promise<DemoJob | null>;
-  create(settings: DemoSettings, title?: string): Promise<DemoJob>;
+  create(ownerId: string, settings: DemoSettings, title?: string): Promise<DemoJob>;
   /** Replace a job's discovered features and record the AI call metadata. */
   setFeatures(
     id: string,
@@ -168,24 +170,31 @@ class InMemoryDemoJobRepository implements DemoJobRepository {
   private languageInFlight = new Set<string>();
 
   constructor(seed: DemoJob[]) {
-    // Clone so we never mutate the exported seed array.
-    this.jobs = seed.map((j) => ({ ...j }));
+    // Clone so we never mutate the exported seed array. Seeded demos are shared
+    // sample data owned by the reserved SEED_OWNER_ID.
+    this.jobs = seed.map((j) => ({ ...j, ownerId: j.ownerId ?? SEED_OWNER_ID }));
   }
 
-  async list(): Promise<DemoJob[]> {
-    return [...this.jobs].sort((a, b) =>
-      b.createdAt.localeCompare(a.createdAt)
-    );
+  async list(ownerId: string): Promise<DemoJob[]> {
+    // A principal sees their own demos plus the shared seed samples.
+    return this.jobs
+      .filter((j) => j.ownerId === ownerId || j.ownerId === SEED_OWNER_ID)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
   async getById(id: string): Promise<DemoJob | null> {
     return this.jobs.find((j) => j.id === id) ?? null;
   }
 
-  async create(settings: DemoSettings, title?: string): Promise<DemoJob> {
+  async create(
+    ownerId: string,
+    settings: DemoSettings,
+    title?: string
+  ): Promise<DemoJob> {
     const now = new Date().toISOString();
     const job: DemoJob = {
       id: generateId(),
+      ownerId,
       title: title?.trim() || deriveTitle(settings),
       settings,
       // A freshly created job has not been processed yet.

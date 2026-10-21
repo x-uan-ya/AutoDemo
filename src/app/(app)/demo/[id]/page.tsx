@@ -12,7 +12,10 @@ import { RenderPanel } from "@/components/render-panel";
 import { MultilingualPanel } from "@/components/multilingual-panel";
 import { QualityCheckPanel } from "@/components/quality-check-panel";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { redirect } from "next/navigation";
 import { getRepository } from "@/lib/repository";
+import { getCurrentUser } from "@/lib/auth/server";
+import { assertCanAccessDemo, AuthenticationError } from "@/lib/security/authz";
 import { displayHost, formatDate } from "@/lib/utils";
 
 export default async function DemoDetailPage({
@@ -21,11 +24,30 @@ export default async function DemoDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
+
+  const user = await getCurrentUser();
+  if (!user) redirect(`/login?next=/demo/${encodeURIComponent(id)}`);
+
   const job = await getRepository().getById(id);
 
-  if (!job) {
+  // Enforce the same ownership boundary as the API routes. Not-owned and
+  // not-found both surface as 404 (non-enumerating).
+  try {
+    assertCanAccessDemo(
+      { id: user.id, authenticated: true },
+      job ?? undefined,
+      "/demo/[id] (page)"
+    );
+  } catch (err) {
+    if (err instanceof AuthenticationError) {
+      redirect(`/login?next=/demo/${encodeURIComponent(id)}`);
+    }
     notFound();
   }
+
+  // `assertCanAccessDemo` guarantees a non-null job here; this also narrows the
+  // type for the JSX below.
+  if (!job) notFound();
 
   return (
     <div>

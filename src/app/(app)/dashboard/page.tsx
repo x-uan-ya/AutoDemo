@@ -3,15 +3,20 @@ import { LayoutDashboard } from "lucide-react";
 import { DemoCard } from "@/components/demo-card";
 import { EmptyState } from "@/components/empty-state";
 import { buttonVariants } from "@/components/ui/button";
+import { redirect } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { getRepository } from "@/lib/repository";
+import { getCurrentUser } from "@/lib/auth/server";
 
 export const metadata = {
   title: "Dashboard — AutoDemo",
 };
 
 export default async function DashboardPage() {
-  const jobs = await getRepository().list();
+  const user = await getCurrentUser();
+  if (!user) redirect("/login?next=/dashboard");
+
+  const jobs = await getRepository().list(user.id);
 
   return (
     <div>

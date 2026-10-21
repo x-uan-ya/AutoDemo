@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getRepository } from "@/lib/repository";
+import { guardDemoRoute } from "@/lib/security/route-guard";
 
 /**
  * PATCH /api/demo/[id]/features
@@ -20,6 +21,10 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+
+  // Auth + CSRF + ownership before any mutation.
+  const guard = await guardDemoRoute(request, id, "default", "/api/demo/[id]/features");
+  if (guard.response) return guard.response;
 
   let body: unknown;
   try {
