@@ -210,8 +210,10 @@ non-`http(s)` requests, and `page.evaluate` only of self-contained first-party
 functions — never website-supplied code.
 
 ### HTTP security headers
-Set in `next.config.mjs`: `Content-Security-Policy` (no `unsafe-eval`;
-`frame-ancestors 'none'`), `X-Content-Type-Options: nosniff`, `Referrer-Policy:
+Set in `next.config.mjs`: `Content-Security-Policy` (no `unsafe-eval` in
+production — it is added in development only, where Next.js/Turbopack and React
+dev tooling require `eval()`; React never uses `eval()` in production),
+`frame-ancestors 'none'`, `X-Content-Type-Options: nosniff`, `Referrer-Policy:
 strict-origin-when-cross-origin`, `X-Frame-Options: DENY`, `Permissions-Policy`,
 and `Strict-Transport-Security`.
 

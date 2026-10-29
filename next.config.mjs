@@ -1,25 +1,30 @@
+const isDev = process.env.NODE_ENV !== "production";
+
 /**
  * Content-Security-Policy.
  *
  * Rationale / required exceptions:
  *  - script-src includes 'unsafe-inline' because Next.js injects small inline
- *    bootstrap scripts; removing it needs nonce wiring (future work). It does
- *    NOT include 'unsafe-eval'.
+ *    bootstrap scripts; removing it needs nonce wiring (future work).
+ *  - 'unsafe-eval' is added in DEVELOPMENT ONLY. Next.js/Turbopack and React's
+ *    dev tooling (HMR, cross-environment callstack reconstruction) require
+ *    eval() in dev. React never uses eval() in production, so the production
+ *    CSP stays strict (no 'unsafe-eval'). Driven by NODE_ENV.
  *  - img-src and media-src allow data: and blob: because generated screenshots
  *    are embedded as data: URLs and video/audio are served from same-origin and
  *    (in dev) blob previews.
- *  - connect-src 'self' — the app's own API only.
+ *  - connect-src 'self' — plus the dev websocket for HMR in development.
  *  - frame-ancestors 'none' — the app must not be framed (clickjacking).
  *  - object-src 'none' — no plugins.
  */
 const CSP = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-inline'",
+  `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`,
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
   "media-src 'self' blob:",
   "font-src 'self' data:",
-  "connect-src 'self'",
+  `connect-src 'self'${isDev ? " ws: wss:" : ""}`,
   "object-src 'none'",
   "base-uri 'self'",
   "form-action 'self'",

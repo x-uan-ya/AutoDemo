@@ -9,11 +9,14 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/lib/**/__tests__/*.test.ts"
+    "test": "tsx --test src/lib/**/__tests__/*.test.ts",
+    "db:migrate": "node --env-file=.env.local scripts/db-migrate.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-bedrock-runtime": "^3.1141.0",
     "@aws-sdk/client-polly": "^3.1141.0",
+    "@neon/config": "^1.9.5",
+    "@neon/env": "^1.6.6",
     "@remotion/bundler": "^4.0.529",
     "@remotion/cli": "^4.0.529",
     "@remotion/renderer": "^4.0.529",
@@ -21,6 +24,7 @@
     "clsx": "^2.1.1",
     "lucide-react": "^0.454.0",
     "next": "16.3.8",
+    "pg": "^8.23.1",
     "playwright": "^1.63.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
@@ -30,6 +34,7 @@
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "autoprefixer": "^10.4.20",

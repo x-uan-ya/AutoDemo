@@ -38,3 +38,4 @@ next-env.d.ts
 
 # generated final videos (Phase 7 artifacts)
 /public/renders/
+.neon

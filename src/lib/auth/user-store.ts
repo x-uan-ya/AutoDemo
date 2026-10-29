@@ -115,11 +115,99 @@ export class InMemoryUserStore implements UserStore {
   }
 }
 
+/**
+ * PostgreSQL-backed user store (Neon / Lakebase). Persists accounts across
+ * restarts and shares them across instances. Same timing-safe verification and
+ * user-enumeration resistance as the in-memory store.
+ */
+export class PgUserStore implements UserStore {
+  async create(email: string, password: string): Promise<User> {
+    const { query } = await import("@/lib/db/pg");
+    const normalized = normalizeEmail(email);
+    const user: User = {
+      id: secureId("user"),
+      email: normalized,
+      passwordHash: await hashPassword(password),
+      createdAt: new Date().toISOString(),
+    };
+    try {
+      await query(
+        "INSERT INTO users (id, email, password_hash, created_at) VALUES ($1, $2, $3, $4)",
+        [user.id, user.email, user.passwordHash, user.createdAt]
+      );
+    } catch (err) {
+      // Unique violation on email -> account already exists.
+      if (err && typeof err === "object" && (err as { code?: string }).code === "23505") {
+        throw new UserExistsError();
+      }
+      throw err;
+    }
+    return user;
+  }
+
+  private async rowToUser(
+    row: { id: string; email: string; password_hash: string; created_at: Date | string } | undefined
+  ): Promise<User | null> {
+    if (!row) return null;
+    return {
+      id: row.id,
+      email: row.email,
+      passwordHash: row.password_hash,
+      createdAt:
+        row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
+    };
+  }
+
+  async findByEmail(email: string): Promise<User | null> {
+    const { query } = await import("@/lib/db/pg");
+    const rows = await query<{
+      id: string;
+      email: string;
+      password_hash: string;
+      created_at: Date | string;
+    }>("SELECT id, email, password_hash, created_at FROM users WHERE email = $1", [
+      normalizeEmail(email),
+    ]);
+    return this.rowToUser(rows[0]);
+  }
+
+  async findById(id: string): Promise<User | null> {
+    const { query } = await import("@/lib/db/pg");
+    const rows = await query<{
+      id: string;
+      email: string;
+      password_hash: string;
+      created_at: Date | string;
+    }>("SELECT id, email, password_hash, created_at FROM users WHERE id = $1", [id]);
+    return this.rowToUser(rows[0]);
+  }
+
+  async verifyCredentials(email: string, password: string): Promise<User | null> {
+    const user = await this.findByEmail(email);
+    if (!user) {
+      // Spend comparable time to avoid user-enumeration via timing.
+      await verifyPassword(password, await getDecoyHash());
+      return null;
+    }
+    const ok = await verifyPassword(password, user.passwordHash);
+    return ok ? user : null;
+  }
+}
+
 const globalForUsers = globalThis as unknown as { __autodemoUserStore?: UserStore };
 
 export function getUserStore(): UserStore {
   if (!globalForUsers.__autodemoUserStore) {
-    globalForUsers.__autodemoUserStore = new InMemoryUserStore();
+    // Use Postgres when a connection string is configured; otherwise fall back
+    // to the in-memory store (local dev / tests / no DB configured).
+    globalForUsers.__autodemoUserStore = process.env.DATABASE_URL?.trim()
+      ? new PgUserStore()
+      : new InMemoryUserStore();
   }
   return globalForUsers.__autodemoUserStore;
+}
+
+/** Test seam: force a specific user store. */
+export function __setUserStore(store: UserStore | null): void {
+  globalForUsers.__autodemoUserStore = store ?? undefined;
 }

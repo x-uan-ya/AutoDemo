@@ -101,11 +101,89 @@ class InMemorySessionStore implements SessionStore {
   }
 }
 
+/**
+ * PostgreSQL-backed session store (Neon / Lakebase). Sessions survive restarts
+ * and are shared across instances. Same guarantees as the in-memory store:
+ * expiry is enforced on read, logout deletes the row, and login rotates the id.
+ */
+export class PgSessionStore implements SessionStore {
+  private makeRecord(userId: string): SessionRecord {
+    const now = Date.now();
+    return {
+      userId,
+      csrfToken: newToken(),
+      createdAt: now,
+      expiresAt: now + sessionTtlMs(),
+    };
+  }
+
+  async create(userId: string): Promise<{ sid: string; record: SessionRecord }> {
+    const { query } = await import("@/lib/db/pg");
+    const sid = newToken();
+    const record = this.makeRecord(userId);
+    await query(
+      "INSERT INTO sessions (sid, user_id, csrf_token, created_at, expires_at) VALUES ($1, $2, $3, to_timestamp($4), to_timestamp($5))",
+      [sid, record.userId, record.csrfToken, record.createdAt / 1000, record.expiresAt / 1000]
+    );
+    return { sid, record };
+  }
+
+  async get(sid: string): Promise<SessionRecord | null> {
+    if (!sid) return null;
+    const { query } = await import("@/lib/db/pg");
+    const rows = await query<{
+      user_id: string;
+      csrf_token: string;
+      created_at: Date;
+      expires_at: Date;
+    }>(
+      "SELECT user_id, csrf_token, created_at, expires_at FROM sessions WHERE sid = $1",
+      [sid]
+    );
+    const row = rows[0];
+    if (!row) return null;
+
+    const expiresAt = new Date(row.expires_at).getTime();
+    if (expiresAt <= Date.now()) {
+      // Expired: invalid, and clean it up.
+      await query("DELETE FROM sessions WHERE sid = $1", [sid]);
+      return null;
+    }
+    return {
+      userId: row.user_id,
+      csrfToken: row.csrf_token,
+      createdAt: new Date(row.created_at).getTime(),
+      expiresAt,
+    };
+  }
+
+  async destroy(sid: string): Promise<void> {
+    if (!sid) return;
+    const { query } = await import("@/lib/db/pg");
+    await query("DELETE FROM sessions WHERE sid = $1", [sid]);
+  }
+
+  async rotate(
+    oldSid: string,
+    userId: string
+  ): Promise<{ sid: string; record: SessionRecord }> {
+    if (oldSid) await this.destroy(oldSid);
+    return this.create(userId);
+  }
+}
+
 const globalForSessions = globalThis as unknown as { __autodemoSessionStore?: SessionStore };
 
 export function getSessionStore(): SessionStore {
   if (!globalForSessions.__autodemoSessionStore) {
-    globalForSessions.__autodemoSessionStore = new InMemorySessionStore();
+    globalForSessions.__autodemoSessionStore = process.env.DATABASE_URL?.trim()
+      ? new PgSessionStore()
+      : new InMemorySessionStore();
   }
   return globalForSessions.__autodemoSessionStore;
+}
+
+/** Test seam: force a specific session store. */
+export function __setSessionStore(store: SessionStore | null): void {
+  globalForSessions.__autodemoSessionStore = store ?? undefined;
 }

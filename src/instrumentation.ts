@@ -23,4 +23,17 @@ export async function register(): Promise<void> {
         backend === "redis" ? "shared across instances via Redis" : "PER-PROCESS"
       })`
   );
+
+  // Persistence backend for users + sessions.
+  const { isPostgresConfigured } = await import("@/lib/db/pg");
+  if (isPostgresConfigured()) {
+    console.info(
+      "[persistence] users + sessions: PostgreSQL (accounts/sessions persist across restarts)"
+    );
+  } else {
+    console.warn(
+      "[persistence] users + sessions: IN-MEMORY (dev only — accounts and " +
+        "sessions are LOST on restart). Set DATABASE_URL to persist."
+    );
+  }
 }
