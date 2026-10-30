@@ -1,9 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { Loader2, Compass } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { ExplorationResult } from "@/components/exploration-result";
 import { apiFetch } from "@/lib/auth/client";
 import {
   DURATION_OPTIONS,
@@ -11,44 +11,43 @@ import {
   PURPOSE_OPTIONS,
   VOICE_OPTIONS,
 } from "@/lib/options";
-import type { WebsiteExploration } from "@/lib/browser/types";
 
 const fieldClass =
   "mt-1.5 block w-full rounded-lg border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60";
 const labelClass = "text-sm font-medium";
 const errorClass = "mt-1 text-xs text-red-600";
 
-interface ExploreErrorBody {
+interface ApiErrorBody {
   code: string;
   message: string;
 }
 
-type Phase = "idle" | "exploring" | "done" | "error";
+type Phase = "idle" | "creating" | "error";
 
 /**
  * Create-demo form.
  *
- * In this milestone, clicking "Generate Demo" runs the Website Explorer:
- * it POSTs the URL to /api/explore, shows an "Exploring website..." state,
- * then renders the structured website data that Playwright collected. No LLM
- * or video generation is involved yet.
+ * "Generate Demo" creates a demo job (POST /api/demo) owned by the signed-in
+ * user from these settings, then navigates to that demo's detail page, where
+ * the explore -> discover -> plan -> actions -> record pipeline runs (the
+ * recording step produces the video).
  */
 export function CreateDemoForm() {
+  const router = useRouter();
   const [phase, setPhase] = useState<Phase>("idle");
   const [fieldError, setFieldError] = useState<string | null>(null);
-  const [apiError, setApiError] = useState<ExploreErrorBody | null>(null);
-  const [result, setResult] = useState<WebsiteExploration | null>(null);
+  const [apiError, setApiError] = useState<ApiErrorBody | null>(null);
 
-  const busy = phase === "exploring";
+  const busy = phase === "creating";
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setFieldError(null);
     setApiError(null);
-    setResult(null);
 
     const form = e.currentTarget;
-    const url = String(new FormData(form).get("websiteUrl") ?? "").trim();
+    const data = new FormData(form);
+    const url = String(data.get("websiteUrl") ?? "").trim();
 
     // Lightweight client-side check; the server does the authoritative
     // (security) validation.
@@ -56,33 +55,46 @@ export function CreateDemoForm() {
       setFieldError("Website URL is required");
       return;
     }
-    if (!/^https:\/\//i.test(url)) {
-      setFieldError("Enter a public URL starting with https://");
+    if (!/^https?:\/\//i.test(url)) {
+      setFieldError("Enter a public URL starting with http:// or https://");
       return;
     }
 
-    setPhase("exploring");
+    setPhase("creating");
     try {
-      const res = await apiFetch("/api/explore", {
+      const res = await apiFetch("/api/demo", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url }),
+        body: JSON.stringify({
+          websiteUrl: url,
+          purpose: String(data.get("purpose") ?? "product_overview"),
+          audience: String(data.get("audience") ?? ""),
+          duration: String(data.get("duration") ?? "60s"),
+          language: String(data.get("language") ?? "english"),
+          voice: String(data.get("voice") ?? "professional_female"),
+          additionalInstructions: String(data.get("additionalInstructions") ?? ""),
+        }),
       });
       const json = await res.json();
 
       if (!res.ok || !json.success) {
+        if (res.status === 401) {
+          // Session expired / not signed in — send them to login.
+          router.push("/login?next=/create");
+          return;
+        }
         setApiError(
           json?.error ?? {
-            code: "browser_error",
-            message: "The exploration failed. Please try again.",
+            code: "error",
+            message: "Could not create the demo. Please try again.",
           }
         );
         setPhase("error");
         return;
       }
 
-      setResult(json.data as WebsiteExploration);
-      setPhase("done");
+      // Land on the new demo's detail page to run the pipeline.
+      router.push(`/demo/${json.data.id}`);
     } catch {
       setApiError({
         code: "network_error",
@@ -205,33 +217,22 @@ export function CreateDemoForm() {
         </Button>
       </form>
 
-      {busy && <ExploringState />}
-
-      {phase === "done" && result && (
-        <div>
-          <h2 className="text-lg font-semibold">Website information</h2>
-          <p className="mb-4 mt-1 text-sm text-muted-foreground">
-            AutoDemo opened the site and collected the following. This is the
-            passive analysis step; planning and video generation come later.
-          </p>
-          <ExplorationResult data={result} />
-        </div>
-      )}
+      {busy && <CreatingState />}
     </div>
   );
 }
 
-function ExploringState() {
+function CreatingState() {
   return (
     <div className="flex items-center gap-3 rounded-xl border border-border bg-accent/40 px-4 py-4 text-sm">
       <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
         <Compass className="h-4 w-4 animate-pulse" />
       </span>
       <div>
-        <p className="font-medium">Exploring website...</p>
+        <p className="font-medium">Creating your demo...</p>
         <p className="text-muted-foreground">
-          Opening the page in a browser and collecting its structure. This can
-          take up to a minute.
+          Setting up the project. You&apos;ll be taken to its page to run the
+          generation pipeline.
         </p>
       </div>
       <Loader2 className="ml-auto h-4 w-4 animate-spin text-muted-foreground" />

@@ -4,6 +4,7 @@ import type {
   TtsProvider,
   GenerateSpeechInput,
   GenerateSpeechResult,
+  TtsVoice,
 } from "./types";
 import { TtsError } from "./types";
 import {
@@ -188,27 +189,212 @@ class MockTtsProvider implements TtsProvider {
 }
 
 // ---------------------------------------------------------------------------
-// Selection
+// Google Gemini provider — real audio, free tier, same key as the AI provider.
 // ---------------------------------------------------------------------------
 
 /**
+ * Gemini TTS returns raw 16-bit PCM (audio/L16, mono). We wrap it in a minimal
+ * WAV container (no dependency) so it is a valid, universally-playable file,
+ * and write it with a .wav extension. Consumers store and reuse the returned
+ * audioPath verbatim, and both the browser players and Remotion's <Audio>
+ * decode by content, so the format swap is transparent.
+ */
+const GEMINI_TTS_MODEL_DEFAULT = "gemini-2.5-flash-preview-tts";
+const GEMINI_TTS_SAMPLE_RATE = 24000; // Hz, from audio/L16;rate=24000
+const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta";
+
+/** Map the app's 4 voices to Gemini prebuilt voices (by tone). */
+const GEMINI_VOICES: Record<TtsVoice, string> = {
+  professional_female: "Kore",
+  professional_male: "Charon",
+  friendly_female: "Aoede",
+  friendly_male: "Puck",
+};
+
+/** Build a 44-byte WAV header for 16-bit mono PCM at the given sample rate. */
+function wavHeader(pcmByteLength: number, sampleRate: number): Buffer {
+  const numChannels = 1;
+  const bitsPerSample = 16;
+  const byteRate = (sampleRate * numChannels * bitsPerSample) / 8;
+  const blockAlign = (numChannels * bitsPerSample) / 8;
+  const header = Buffer.alloc(44);
+  header.write("RIFF", 0);
+  header.writeUInt32LE(36 + pcmByteLength, 4); // file size - 8
+  header.write("WAVE", 8);
+  header.write("fmt ", 12);
+  header.writeUInt32LE(16, 16); // PCM fmt chunk size
+  header.writeUInt16LE(1, 20); // audio format = PCM
+  header.writeUInt16LE(numChannels, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(byteRate, 28);
+  header.writeUInt16LE(blockAlign, 32);
+  header.writeUInt16LE(bitsPerSample, 34);
+  header.write("data", 36);
+  header.writeUInt32LE(pcmByteLength, 40);
+  return header;
+}
+
+/** Parse "audio/L16;codec=pcm;rate=24000" -> sample rate (fallback default). */
+function sampleRateFromMime(mime: string | undefined): number {
+  const m = mime?.match(/rate=(\d+)/);
+  const n = m ? Number(m[1]) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : GEMINI_TTS_SAMPLE_RATE;
+}
+
+class GeminiTtsProvider implements TtsProvider {
+  readonly name = "gemini";
+  private readonly apiKey: string;
+  private readonly model: string;
+
+  constructor(apiKey: string, model: string) {
+    this.apiKey = apiKey;
+    this.model = model;
+  }
+
+  async generateSpeech(
+    input: GenerateSpeechInput
+  ): Promise<GenerateSpeechResult> {
+    const language = toTtsLanguage(input.language);
+    if (!language) {
+      throw new TtsError(
+        "unsupported_language",
+        `Language "${input.language}" is not supported for voice.`
+      );
+    }
+    const voiceName = GEMINI_VOICES[input.voice];
+    if (!voiceName) {
+      throw new TtsError(
+        "unsupported_voice",
+        `Voice "${input.voice}" is not available.`
+      );
+    }
+    if (!input.text.trim()) {
+      throw new TtsError("empty_text", "There is no narration to speak.");
+    }
+
+    const url = `${GEMINI_API_BASE}/models/${encodeURIComponent(
+      this.model
+    )}:generateContent`;
+    const body = {
+      contents: [{ parts: [{ text: input.text }] }],
+      generationConfig: {
+        responseModalities: ["AUDIO"],
+        speechConfig: {
+          voiceConfig: { prebuiltVoiceConfig: { voiceName } },
+        },
+      },
+    };
+
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": this.apiKey,
+        },
+        body: JSON.stringify(body),
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      throw new TtsError("provider", `Gemini TTS request failed: ${message}`);
+    }
+
+    if (!res.ok) {
+      let detail = "";
+      try {
+        detail = (await res.text()).slice(0, 200);
+      } catch {
+        /* ignore */
+      }
+      if (res.status === 401 || res.status === 403) {
+        throw new TtsError("config", "Gemini rejected the API key for TTS.");
+      }
+      throw new TtsError(
+        "provider",
+        `Gemini TTS failed (HTTP ${res.status}): ${detail}`
+      );
+    }
+
+    const json = (await res.json()) as {
+      candidates?: Array<{
+        content?: {
+          parts?: Array<{
+            inlineData?: { mimeType?: string; data?: string };
+            inline_data?: { mime_type?: string; data?: string };
+          }>;
+        };
+      }>;
+    };
+    const part = json.candidates?.[0]?.content?.parts?.[0];
+    const inline = part?.inlineData ?? part?.inline_data;
+    const b64 = inline?.data;
+    if (!b64) {
+      throw new TtsError("provider", "Gemini TTS returned no audio.");
+    }
+
+    const pcm = Buffer.from(b64, "base64");
+    const sampleRate = sampleRateFromMime(
+      // Both camel and snake case appear across API versions.
+      (inline as { mimeType?: string }).mimeType ??
+        (inline as { mime_type?: string }).mime_type
+    );
+    const wav = Buffer.concat([wavHeader(pcm.length, sampleRate), pcm]);
+
+    // Gemini returns PCM/WAV, not MP3 — write a .wav file so the extension is
+    // honest. Consumers use the returned audioPath verbatim.
+    const wavPath = input.outputPath.replace(/\.[^.]+$/, "") + ".wav";
+    await fs.mkdir(path.dirname(wavPath), { recursive: true });
+    await fs.writeFile(wavPath, wav);
+
+    // Duration from the actual PCM: bytes / (sampleRate * bytesPerSample).
+    const duration = Math.max(
+      1,
+      Math.round(pcm.length / (sampleRate * 2))
+    );
+
+    return { audioPath: publicPath(wavPath), duration };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Selection
+// ---------------------------------------------------------------------------
+
+const GEMINI_TTS_MODEL =
+  process.env.GEMINI_TTS_MODEL?.trim() || GEMINI_TTS_MODEL_DEFAULT;
+
+/**
  * Select the TTS provider from the environment:
- *   - AUTODEMO_TTS_PROVIDER=mock  -> mock
- *   - AUTODEMO_TTS_PROVIDER=polly -> Polly
- *   - otherwise: Polly if an AWS region is configured, else mock.
+ *   - AUTODEMO_TTS_PROVIDER=mock    -> mock (silent)
+ *   - AUTODEMO_TTS_PROVIDER=gemini  -> Gemini TTS (needs GEMINI_API_KEY)
+ *   - AUTODEMO_TTS_PROVIDER=polly   -> Amazon Polly
+ *   - otherwise (auto): Gemini if GEMINI_API_KEY is set, else Polly if an AWS
+ *     region is configured, else the silent mock.
  *
- * Keeps the app runnable with no cloud setup while allowing real TTS when
- * credentials/region are present.
+ * Keeps the app runnable with no cloud setup while using real TTS when a key
+ * or AWS region is present.
  */
 export function getTtsProvider(): TtsProvider {
   const explicit = process.env.AUTODEMO_TTS_PROVIDER?.toLowerCase();
-  if (explicit === "mock") return new MockTtsProvider();
-
+  const geminiKey = process.env.GEMINI_API_KEY?.trim();
   const region =
     process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || "";
 
-  if (explicit === "polly" || region) {
-    return new PollyTtsProvider(region || "us-east-1");
+  if (explicit === "mock") return new MockTtsProvider();
+  if (explicit === "gemini") {
+    if (!geminiKey) {
+      throw new TtsError(
+        "config",
+        "AUTODEMO_TTS_PROVIDER=gemini but GEMINI_API_KEY is not set."
+      );
+    }
+    return new GeminiTtsProvider(geminiKey, GEMINI_TTS_MODEL);
   }
+  if (explicit === "polly") return new PollyTtsProvider(region || "us-east-1");
+
+  // Auto-detect when no explicit provider is set.
+  if (geminiKey) return new GeminiTtsProvider(geminiKey, GEMINI_TTS_MODEL);
+  if (region) return new PollyTtsProvider(region);
   return new MockTtsProvider();
 }

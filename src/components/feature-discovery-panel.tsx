@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Sparkles,
   Loader2,
@@ -37,6 +38,7 @@ export function FeatureDiscoveryPanel({
   initialFeatures: DiscoveredFeature[];
   initialMeta?: FeatureDiscoveryMeta;
 }) {
+  const router = useRouter();
   const [features, setFeatures] = useState<DiscoveredFeature[]>(initialFeatures);
   const [meta, setMeta] = useState<FeatureDiscoveryMeta | undefined>(initialMeta);
   const [phase, setPhase] = useState<Phase>(
@@ -69,6 +71,10 @@ export function FeatureDiscoveryPanel({
       setFeatures(json.data.features as DiscoveredFeature[]);
       setMeta(json.data.meta as FeatureDiscoveryMeta);
       setPhase("done");
+      // Re-render the server component so downstream panels (e.g. Storyboard,
+      // gated on hasFeatures) see the newly discovered features without a
+      // manual page refresh.
+      router.refresh();
     } catch {
       setError({
         code: "network_error",
@@ -92,6 +98,9 @@ export function FeatureDiscoveryPanel({
         body: JSON.stringify({ featureId: feature.id, selected: next }),
       });
       if (!res.ok) throw new Error("failed");
+      // Refresh the server component so the Storyboard panel's selected-feature
+      // gate reflects the new selection.
+      router.refresh();
     } catch {
       // Revert on failure.
       setFeatures((prev) =>
@@ -160,19 +169,64 @@ export function FeatureDiscoveryPanel({
   );
 }
 
+/** Typical discovery time (browser exploration + one AI call). */
+const DISCOVERY_ESTIMATE_SECONDS = 60;
+
 function DiscoveringState() {
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    const startedAt = Date.now();
+    const id = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - startedAt) / 1000));
+    }, 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const overrun = elapsed > DISCOVERY_ESTIMATE_SECONDS;
+  const remaining = Math.max(0, DISCOVERY_ESTIMATE_SECONDS - elapsed);
+  // Cap the visible progress bar just under 100% until it actually finishes,
+  // so it never looks "done" while still working.
+  const pct = Math.min(95, Math.round((elapsed / DISCOVERY_ESTIMATE_SECONDS) * 100));
+
   return (
-    <div className="mt-4 flex items-center gap-3 rounded-lg border border-border bg-accent/40 px-4 py-4 text-sm">
-      <Loader2 className="h-4 w-4 animate-spin text-primary" />
-      <div>
-        <p className="font-medium">Analyzing the website...</p>
-        <p className="text-muted-foreground">
-          Exploring the page and identifying features from its content and
-          screenshots. This can take up to a minute.
-        </p>
+    <div className="mt-4 rounded-lg border border-border bg-accent/40 px-4 py-4 text-sm">
+      <div className="flex items-center gap-3">
+        <Loader2 className="h-4 w-4 animate-spin text-primary" />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center justify-between gap-2">
+            <p className="font-medium">Analyzing the website...</p>
+            <p className="tabular-nums text-xs text-muted-foreground">
+              {formatElapsed(elapsed)}
+              {!overrun && ` · ~${remaining}s left`}
+            </p>
+          </div>
+          <p className="mt-1 text-muted-foreground">
+            {overrun
+              ? "Taking a little longer than usual — hang tight, almost there."
+              : "Exploring the page and identifying features from its content and screenshots. This usually takes 30–60 seconds."}
+          </p>
+          <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-secondary">
+            <div
+              className={cn(
+                "h-full rounded-full bg-primary transition-all duration-1000 ease-linear",
+                overrun && "animate-pulse"
+              )}
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+        </div>
       </div>
     </div>
   );
+}
+
+/** Format seconds as m:ss once past a minute, else "Ns". */
+function formatElapsed(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
 }
 
 function FeatureItem({

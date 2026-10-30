@@ -83,7 +83,9 @@ export default async function DemoDetailPage({
           <StoryboardPanel
             jobId={job.id}
             initialPlan={job.plan}
-            hasFeatures={job.features.length > 0}
+            selectedFeatureCount={
+              job.features.filter((f) => f.selected).length
+            }
           />
 
           <BrowserActionsPanel

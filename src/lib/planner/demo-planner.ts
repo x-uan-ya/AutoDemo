@@ -71,7 +71,7 @@ export async function generatePlan(job: DemoJob): Promise<DemoPlan> {
     );
   }
 
-  const provider = getAiProvider();
+  const provider = await getAiProvider();
   const { response, usage } = await provider.planDemo({ features, context: ctx });
 
   // Map to domain scenes. Keep only scenes whose featureId is one we sent, and
@@ -117,7 +117,7 @@ export async function regenerateScene(
   }
 
   const ctx = buildContext(job);
-  const provider = getAiProvider();
+  const provider = await getAiProvider();
   const { response } = await provider.regenerateScene({
     feature,
     context: ctx,

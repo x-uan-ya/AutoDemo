@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   MousePointerClick,
   Loader2,
@@ -50,6 +51,7 @@ export function BrowserActionsPanel({
   initialActionPlan?: ActionPlan;
   storyboardApproved: boolean;
 }) {
+  const router = useRouter();
   const [plan, setPlan] = useState<ActionPlan | undefined>(initialActionPlan);
   const [generating, setGenerating] = useState(false);
   const [approving, setApproving] = useState(false);
@@ -116,6 +118,9 @@ export function BrowserActionsPanel({
         return;
       }
       setPlan(json.actionPlan as ActionPlan);
+      // Approving the actions unlocks the Recording panel (gated on
+      // actionsApproved), so re-render the server component to pass it down.
+      router.refresh();
     } catch {
       setError({ code: "network", message: "Could not reach the server." });
     } finally {

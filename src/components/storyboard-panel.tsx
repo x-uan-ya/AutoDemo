@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Clapperboard,
   Loader2,
@@ -41,12 +42,15 @@ type Busy =
 export function StoryboardPanel({
   jobId,
   initialPlan,
-  hasFeatures,
+  selectedFeatureCount,
 }: {
   jobId: string;
   initialPlan?: DemoPlan;
-  hasFeatures: boolean;
+  /** Number of features currently selected for the demo (gates generation). */
+  selectedFeatureCount: number;
 }) {
+  const hasSelectedFeatures = selectedFeatureCount > 0;
+  const router = useRouter();
   const [plan, setPlan] = useState<DemoPlan | undefined>(initialPlan);
   const [busy, setBusy] = useState<Busy>(null);
   const [error, setError] = useState<ApiError | null>(null);
@@ -182,6 +186,9 @@ export function StoryboardPanel({
         return;
       }
       applyPlan(json.data.plan as DemoPlan);
+      // Approving the storyboard unlocks the Browser Actions panel (gated on
+      // storyboardApproved), so re-render the server component to pass it down.
+      router.refresh();
     } catch {
       setError({ code: "network", message: "Could not reach the server." });
     } finally {
@@ -209,7 +216,7 @@ export function StoryboardPanel({
         </div>
         <Button
           onClick={generate}
-          disabled={!hasFeatures || generating || busy?.kind === "approve"}
+          disabled={!hasSelectedFeatures || generating || busy?.kind === "approve"}
           size="sm"
           variant={plan ? "outline" : "primary"}
         >
@@ -218,9 +225,10 @@ export function StoryboardPanel({
         </Button>
       </div>
 
-      {!hasFeatures && !plan && (
+      {!hasSelectedFeatures && !plan && (
         <div className="mt-5 rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
-          Discover and select features first, then generate a storyboard.
+          Select at least one discovered feature above, then generate a
+          storyboard. Each selected feature becomes one scene.
         </div>
       )}
 

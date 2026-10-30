@@ -21,6 +21,13 @@ import { MOCK_JOBS } from "@/data/mock-jobs";
 import { createInitialPipeline } from "@/lib/pipeline";
 import { secureId } from "@/lib/security/ids";
 import { SEED_OWNER_ID } from "@/lib/security/authz";
+import { PgDemoJobRepository } from "@/lib/pg-repository";
+
+/** Construct the Postgres repository. Separated so the import stays top-level
+ * (clean ESM interop) while instantiation remains lazy inside getRepository. */
+function createPgRepository(): DemoJobRepository {
+  return new PgDemoJobRepository();
+}
 
 /**
  * Persistence boundary for demo jobs.
@@ -156,9 +163,11 @@ function deriveTitle(settings: DemoSettings): string {
 
 /**
  * In-memory implementation. State lives for the lifetime of the server
- * process, which is enough for the foundation milestone and local development.
+ * process, which is enough for local development and tests. It is also reused
+ * by PgDemoJobRepository as an in-transaction mutator for a single job, so the
+ * exact, tested document-mutation logic is shared rather than duplicated.
  */
-class InMemoryDemoJobRepository implements DemoJobRepository {
+export class InMemoryDemoJobRepository implements DemoJobRepository {
   private jobs: DemoJob[];
   /** Job ids with an in-flight recording — the duplicate-job guard. */
   private recordingInFlight = new Set<string>();
@@ -173,6 +182,14 @@ class InMemoryDemoJobRepository implements DemoJobRepository {
     // Clone so we never mutate the exported seed array. Seeded demos are shared
     // sample data owned by the reserved SEED_OWNER_ID.
     this.jobs = seed.map((j) => ({ ...j, ownerId: j.ownerId ?? SEED_OWNER_ID }));
+  }
+
+  /**
+   * Reused by PgDemoJobRepository: read back the (possibly mutated) single job
+   * after delegating a document mutation to a throwaway single-job instance.
+   */
+  peekFirst(): DemoJob | undefined {
+    return this.jobs[0];
   }
 
   async list(ownerId: string): Promise<DemoJob[]> {
@@ -642,9 +659,24 @@ const globalForRepo = globalThis as unknown as {
   __autodemoRepo?: DemoJobRepository;
 };
 
+/**
+ * Select the demo-job repository.
+ *   - DATABASE_URL set  -> PostgreSQL (demos persist across restarts, shared
+ *     across instances).
+ *   - otherwise         -> in-memory (dev/test; lost on restart).
+ */
 export function getRepository(): DemoJobRepository {
   if (!globalForRepo.__autodemoRepo) {
-    globalForRepo.__autodemoRepo = new InMemoryDemoJobRepository(MOCK_JOBS);
+    if (process.env.DATABASE_URL?.trim()) {
+      globalForRepo.__autodemoRepo = createPgRepository();
+    } else {
+      globalForRepo.__autodemoRepo = new InMemoryDemoJobRepository(MOCK_JOBS);
+    }
   }
   return globalForRepo.__autodemoRepo;
+}
+
+/** Test seam: force a specific repository implementation. */
+export function __setRepository(repo: DemoJobRepository | null): void {
+  globalForRepo.__autodemoRepo = repo ?? undefined;
 }

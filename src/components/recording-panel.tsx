@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Clapperboard,
   Loader2,
@@ -43,6 +44,7 @@ export function RecordingPanel({
   sceneTitles: string[];
   initialRecording?: RecordingResult;
 }) {
+  const router = useRouter();
   const [phase, setPhase] = useState<Phase>(
     initialRecording
       ? initialRecording.success
@@ -116,6 +118,9 @@ export function RecordingPanel({
       if (!result.success && result.errors.length === 0) {
         setError(json?.error ?? { code: "failed", message: "Recording failed." });
       }
+      // A successful recording unlocks Quality Check and Render (gated on the
+      // server-provided recording state), so re-render the server component.
+      if (result.success) router.refresh();
     } catch {
       stopProgressSimulation();
       setError({ code: "network", message: "Could not reach the server." });

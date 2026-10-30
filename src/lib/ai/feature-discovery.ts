@@ -24,7 +24,7 @@ function featureId(): string {
 export async function discoverFeatures(
   input: DiscoverFeaturesInput
 ): Promise<FeatureDiscoveryOutput> {
-  const provider = getAiProvider();
+  const provider = await getAiProvider();
   const { response, usage } = await provider.discoverFeatures(input);
 
   // Sort by importance so the most relevant features surface first, and

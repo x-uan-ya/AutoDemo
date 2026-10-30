@@ -547,25 +547,55 @@ function logUsage(label: string, usage: AiUsage): void {
   );
 }
 
+const DEFAULT_GEMINI_MODEL = "gemini-flash-latest";
+
+/** Construct the Gemini provider from env; throws (config) if the key is missing. */
+async function makeGeminiProvider(): Promise<MultimodalAiProvider> {
+  const apiKey = process.env.GEMINI_API_KEY?.trim();
+  if (!apiKey) {
+    throw new AiError(
+      "config",
+      "AUTODEMO_AI_PROVIDER=gemini but GEMINI_API_KEY is not set."
+    );
+  }
+  const model = process.env.GEMINI_MODEL?.trim() || DEFAULT_GEMINI_MODEL;
+  // Lazy import keeps the Gemini code out of paths that never use it.
+  const { GeminiAiProvider } = await import("./gemini-provider");
+  return new GeminiAiProvider(apiKey, model);
+}
+
 /**
  * Select the provider based on environment.
  *
- * - If AUTODEMO_AI_PROVIDER=mock, or no AWS region is configured, use the mock.
- * - Otherwise use Bedrock with the configured (or default) model and region.
+ * Precedence:
+ *   1. AUTODEMO_AI_PROVIDER explicitly set to "mock" | "bedrock" | "gemini".
+ *   2. GEMINI_API_KEY present            -> Gemini.
+ *   3. An AWS region configured          -> Bedrock.
+ *   4. Nothing configured                -> deterministic mock.
  *
- * This keeps the app runnable with zero cloud setup while allowing a real
- * provider in environments that have credentials.
+ * This keeps the app runnable with zero cloud setup while letting a real
+ * provider take over when credentials exist. Gemini is async to construct
+ * (lazy import), so this returns a Promise.
  */
-export function getAiProvider(): MultimodalAiProvider {
+export async function getAiProvider(): Promise<MultimodalAiProvider> {
   const explicit = process.env.AUTODEMO_AI_PROVIDER?.toLowerCase();
+
   if (explicit === "mock") return new MockAiProvider();
+  if (explicit === "gemini") return makeGeminiProvider();
 
   const region =
     process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || "";
 
-  if (explicit === "bedrock" || region) {
+  if (explicit === "bedrock") {
     const model = process.env.BEDROCK_MODEL_ID || DEFAULT_MODEL_ID;
     return new BedrockAiProvider(model, region || "us-east-1");
+  }
+
+  // Auto-detect when no explicit provider is set.
+  if (process.env.GEMINI_API_KEY?.trim()) return makeGeminiProvider();
+  if (region) {
+    const model = process.env.BEDROCK_MODEL_ID || DEFAULT_MODEL_ID;
+    return new BedrockAiProvider(model, region);
   }
 
   // Default: no cloud configured -> deterministic mock.
